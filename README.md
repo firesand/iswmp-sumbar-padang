@@ -6,7 +6,7 @@ Sub-project sistem absensi & crosscheck kehadiran tim lapangan, dikembangkan dar
 
 > **Developer:** Hikmahtiar Studio  
 > **Repository:** https://github.com/firesand/iswmp-sumbar-padang  
-> **Status:** Perencanaan / Setup awal  
+> **Status:** Fase 1 — Core adaptation (fork selesai, build OK)  
 > **Provinsi:** Sumatera Barat  
 > **Wilayah kerja:** Kota Padang (11 kelurahan + kantor kota)
 
@@ -36,7 +36,12 @@ Detail peran: lihat [docs/ORGANIZATION.md](./docs/ORGANIZATION.md)
 ISWMP-SumBar-Padang/
 ├── README.md                 ← Ringkasan proyek (file ini)
 ├── PROJECT_SPEC.md           ← Spesifikasi teknis & fungsional
-├── .env.example              ← Template konfigurasi (saat development)
+├── memory.md                 ← Konteks percakapan & keputusan
+├── package.json              ← Vite + React app
+├── .env.example              ← Template konfigurasi Firebase
+├── src/                      ← Source code (fork dari parent)
+│   └── config/projectConfig.js
+├── public/                   ← PWA assets
 └── docs/
     ├── ORGANIZATION.md       ← Peran & hierarki pengguna
     ├── DATA_MODEL.md         ← Skema database Firestore
@@ -54,6 +59,7 @@ ISWMP-SumBar-Padang/
 | [docs/ORGANIZATION.md](./docs/ORGANIZATION.md) | 22 TA lapangan + 4 tim kantor |
 | [docs/DATA_MODEL.md](./docs/DATA_MODEL.md) | Koleksi Firestore & field definitions |
 | [docs/KELURAHAN.md](./docs/KELURAHAN.md) | Master data 11 kelurahan |
+| [docs/FIREBASE_SETUP.md](./docs/FIREBASE_SETUP.md) | Panduan setup Firebase + seed |
 | [docs/ROADMAP.md](./docs/ROADMAP.md) | Fase pengembangan |
 
 ---
@@ -62,9 +68,19 @@ ISWMP-SumBar-Padang/
 
 1. Lengkapi daftar 11 kelurahan di [docs/KELURAHAN.md](./docs/KELURAHAN.md)
 2. Tentukan koordinat kantor kota Padang (4 orang tim kantor)
-3. Fork/adaptasi codebase dari `surya-abadi-connecteam/`
+3. ~~Fork/adaptasi codebase dari `surya-abadi-connecteam/`~~ ✅ Selesai
 4. Setup Firebase project terpisah untuk ISWMP SumBar-Padang
-5. Implementasi Fase 1 (multi-lokasi + struktur peran)
+5. Implementasi multi-geofence + adaptasi model user (Fase 1 lanjutan)
+
+## Development
+
+```bash
+cd ISWMP-SumBar-Padang
+npm install
+cp .env.example .env.local
+# Isi kredensial Firebase di .env.local
+npm run dev
+```
 
 ---
 

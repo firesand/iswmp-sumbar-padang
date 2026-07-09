@@ -1,0 +1,49 @@
+{
+  "name": "ISWMP SumBar-Padang",
+  "short_name": "ISWMP Padang",
+  "description": "Sistem Absensi & Crosscheck Kehadiran — ISWMP Kota Padang",
+  "theme_color": "#00A651",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "screenshots": [
+    {
+      "src": "/screenshot1.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Login Screen"
+    },
+    {
+      "src": "/screenshot2.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Dashboard"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Check In",
+      "short_name": "Check In",
+      "description": "Quick check in",
+      "url": "/employee",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

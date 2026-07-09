@@ -1,0 +1,49 @@
+{
+  "name": "iswmp-sumbar-padang",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "author": "Hikmahtiar Studio (2026)",
+  "description": "Sistem Absensi & Crosscheck Kehadiran — ISWMP Kota Padang",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "clean": "rm -rf dist/ node_modules/.vite",
+    "clean:all": "rm -rf dist/ node_modules/.vite node_modules/ package-lock.json && npm install",
+    "seed": "node scripts/seed-firestore.mjs",
+    "firebase": "firebase",
+    "firebase:login": "firebase login",
+    "firebase:deploy:rules": "firebase deploy --only firestore:rules,storage,firestore:indexes",
+    "clean:cache": "npm cache clean --force && rm -rf node_modules/.vite"
+  },
+  "dependencies": {
+    "@emailjs/browser": "^4.4.1",
+    "firebase": "^12.0.0",
+    "nodemailer": "^7.0.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-hot-toast": "^2.5.2",
+    "react-pdf": "^10.0.1",
+    "react-router-dom": "^7.7.1",
+    "react-webcam": "^7.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.1",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "autoprefixer": "^10.4.17",
+    "eslint": "^9.30.1",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "firebase-admin": "^14.1.0",
+    "firebase-tools": "^15.22.4",
+    "globals": "^16.3.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^7.1.1"
+  }
+}

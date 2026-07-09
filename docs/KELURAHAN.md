@@ -1,28 +1,38 @@
 # Master Data Kelurahan — ISWMP SumBar-Padang
 
-**Status:** Menunggu input  
+**Status:** Daftar kelurahan dikonfirmasi — koordinat GPS menunggu survei  
+**Sumber:** Kelurahan ISWMP Padang.pdf (9 Jul 2026)  
 **Total kelurahan:** 11  
 **Kota:** Padang, Sumatera Barat
 
 ---
 
-## Template Data
+## Daftar 11 Kelurahan Kegiatan ISWMP
 
-Isi tabel di bawah ini saat daftar kelurahan sudah tersedia.
+| No | Nama Kelurahan | Kecamatan | ID | Lat | Lng | Radius (m) | TA Persampahan | TA Kelembagaan | Status |
+|----|----------------|-----------|-----|-----|-----|------------|----------------|----------------|--------|
+| 1 | Alang Laweh | Padang Selatan | `kel-alang-laweh` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 2 | Rawang | Padang Selatan | `kel-rawang` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 3 | Lubuk Begalung | Padang Timur | `kel-lubuk-begalung` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 4 | Tanjung Aur | Lubuk Begalung | `kel-tanjung-aur` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 5 | Surau Gadang | Nanggalo | `kel-surau-gadang` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 6 | Lubuk Buaya | Koto Tangah | `kel-lubuk-buaya` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 7 | Parupuak Tabing | Koto Tangah | `kel-parupuak-tabing` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 8 | Rimbo Kaluang | Padang Barat | `kel-rimbo-kaluang` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 9 | Berok Nipah | Padang Barat | `kel-berok-nipah` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 10 | Batang Arau | Padang Selatan | `kel-batang-arau` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
+| 11 | Kampung Pondok | Padang Barat | `kel-kampung-pondok` | _TBD_ | _TBD_ | 300 | | | ⏳ koordinat |
 
-| No | Nama Kelurahan | Kecamatan | Lat | Lng | Radius (m) | TA Persampahan | TA Kelembagaan | Status |
-|----|----------------|-----------|-----|-----|------------|----------------|----------------|--------|
-| 1 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 2 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 3 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 4 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 5 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 6 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 7 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 8 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 9 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 10 | _belum diinput_ | | | | 300 | | | ⏳ |
-| 11 | _belum diinput_ | | | | 300 | | | ⏳ |
+### Ringkasan per Kecamatan
+
+| Kecamatan | Jumlah Kelurahan | Kelurahan |
+|-----------|------------------|-----------|
+| Padang Selatan | 3 | Alang Laweh, Rawang, Batang Arau |
+| Padang Timur | 1 | Lubuk Begalung |
+| Lubuk Begalung | 1 | Tanjung Aur |
+| Nanggalo | 1 | Surau Gadang |
+| Koto Tangah | 2 | Lubuk Buaya, Parupuak Tabing |
+| Padang Barat | 3 | Rimbo Kaluang, Berok Nipah, Kampung Pondok |
 
 ---
 
@@ -52,31 +62,141 @@ Isi tabel di bawah ini saat daftar kelurahan sudah tersedia.
 
 ## Seed Data (JSON)
 
-Setelah diisi, data ini akan di-import ke Firestore collection `kelurahan`:
+Data untuk import ke Firestore collection `kelurahan` — koordinat diisi setelah survei lapangan:
 
 ```javascript
-// Contoh format — ganti dengan data aktual
 [
   {
-    id: "kel-001",
-    nama: "Nama Kelurahan",
-    kecamatan: "Nama Kecamatan",
+    id: "kel-alang-laweh",
+    nama: "Alang Laweh",
+    kecamatan: "Padang Selatan",
     kota: "Padang",
     provinsi: "Sumatera Barat",
-    lat: -0.000000,
-    lng: 100.000000,
+    lat: null,
+    lng: null,
     radius: 300,
-    isActive: true
+    isActive: false
+  },
+  {
+    id: "kel-rawang",
+    nama: "Rawang",
+    kecamatan: "Padang Selatan",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-lubuk-begalung",
+    nama: "Lubuk Begalung",
+    kecamatan: "Padang Timur",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-tanjung-aur",
+    nama: "Tanjung Aur",
+    kecamatan: "Lubuk Begalung",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-surau-gadang",
+    nama: "Surau Gadang",
+    kecamatan: "Nanggalo",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-lubuk-buaya",
+    nama: "Lubuk Buaya",
+    kecamatan: "Koto Tangah",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-parupuak-tabing",
+    nama: "Parupuak Tabing",
+    kecamatan: "Koto Tangah",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-rimbo-kaluang",
+    nama: "Rimbo Kaluang",
+    kecamatan: "Padang Barat",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-berok-nipah",
+    nama: "Berok Nipah",
+    kecamatan: "Padang Barat",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-batang-arau",
+    nama: "Batang Arau",
+    kecamatan: "Padang Selatan",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
+  },
+  {
+    id: "kel-kampung-pondok",
+    nama: "Kampung Pondok",
+    kecamatan: "Padang Barat",
+    kota: "Padang",
+    provinsi: "Sumatera Barat",
+    lat: null,
+    lng: null,
+    radius: 300,
+    isActive: false
   }
-  // ... 10 kelurahan lainnya
 ]
 ```
+
+> `isActive: false` sampai koordinat GPS diisi dan dikonfirmasi. Setelah koordinat tersedia, ubah ke `true`.
 
 ---
 
 ## Checklist
 
-- [ ] Daftar 11 kelurahan dikonfirmasi
+- [x] Daftar 11 kelurahan dikonfirmasi (sumber: PDF 9 Jul 2026)
 - [ ] Koordinat GPS per kelurahan disurvei
 - [ ] Radius geofence dikalibrasi per lokasi
 - [ ] Koordinat kantor kota Padang ditentukan

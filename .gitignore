@@ -1,27 +1,39 @@
-# Dependencies
-node_modules/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Build
-dist/
+node_modules
+dist
+dist-ssr
+*.local
 
-# Environment (jangan commit kredensial)
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Backup directories
+backup_local_*/
+
+# Environment files - IMPORTANT FOR SECURITY
 .env
 .env.local
 .env.production
 .env.development
 .env.*.local
+service-account.json
 
-# Logs
-*.log
-npm-debug.log*
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
-.idea/
-
-# Vite cache
-.vite/
+# Keep example file
+!.env.example
+.vercel

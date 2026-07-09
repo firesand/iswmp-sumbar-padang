@@ -2,7 +2,7 @@
 
 > **Tujuan file ini:** Jembatan informasi keberlanjutan pembahasan proyek.  
 > Baca file ini di awal setiap sesi baru agar konteks tidak hilang.  
-> **Update terakhir:** 9 Juli 2026
+> **Update terakhir:** 10 Juli 2026
 
 ---
 
@@ -22,68 +22,81 @@
 | **Nama lengkap** | Integrated Solid Waste Management Project — Sumatera Barat, Kota Padang |
 | **Tujuan aplikasi** | Crosscheck kehadiran tim proyek (bukan HR/payroll) |
 | **Developer** | Hikmahtiar Studio |
-| **Status saat ini** | Fase 0 — Setup & perencanaan (parent sudah sync GitHub, belum fork codebase) |
-| **Parent commit lokal** | `1b9605e` — sinkron dengan `origin/main` (9 Jul 2026) |
-| **Workspace lokal** | `github_SA_Connecteam/ISWMP-SumBar-Padang/` |
+| **Status saat ini** | Fase 1 — Core adaptation (Firebase live, registrasi & login OK, belum seed & check-in uji) |
+| **Workspace lokal** | `~/iswmp-sumbar-padang/` |
 | **Repo ISWMP (GitHub)** | https://github.com/firesand/iswmp-sumbar-padang |
-| **Parent project** | `github_SA_Connecteam/surya-abadi-connecteam/` |
-| **Repo parent (GitHub)** | https://github.com/firesand/surya-abadi-connecteam |
-| **Production parent** | https://surya-abadi-connecteam.vercel.app |
+| **Firebase project** | https://console.firebase.google.com/project/iswmp-sumbar-padang |
+| **Firebase region** | Firestore: `asia-southeast2` (Jakarta) |
+| **Parent project** | `firesand/surya-abadi-connecteam` (tidak diubah) |
 | **Provinsi / Kota** | Sumatera Barat — Kota Padang |
 | **Total user absensi** | 26 orang (+ 1–2 admin) |
 | **Total geofence** | 12 (11 kelurahan + 1 kantor kota) |
+
+### User testing saat ini (Firestore)
+
+| Field | Nilai |
+|-------|-------|
+| Email | `firesand@gmail.com` |
+| UID | `TJBS6DlyhcbcGxOtoxdCXLQeFYq1` |
+| Role | `office_staff` |
+| Peran | `KORKOT` (Koordinator Kota) |
+| Status | `active` / `isActive: true` |
+| Catatan | Akun testing developer — bukan data produksi final |
 
 ---
 
 ## Konteks dari Percakapan
 
-### Sesi 1 — Review parent project (9 Jul 2026)
+### Sesi 1–3 — Review parent + perencanaan Padang (9 Jul 2026)
 
-User minta cek repo `firesand/surya-abadi-connecteam`. Temuan utama:
-
-- Aplikasi **production-ready** untuk PT Surya Abadi (Depok): absensi GPS + selfie, admin dashboard, payroll, cuti, PWA
-- Stack: React 19 + Vite 7 + Tailwind + Firebase + Vercel
-- Build sukses; bundle JS ~1.3 MB
-- Bug ditemukan: `navigate` dipakai tanpa import di `App.jsx` baris 190 (akun suspended)
-- ESLint 81 masalah; file `.backup` dan `console_log.txt` (data sensitif) masih di repo parent
-- Ada 1 PR terbuka: fix validasi lokasi GPS (branch Copilot)
-
-**Kesimpulan sesi:** Parent project cocok sebagai **fondasi**, bukan rebuild from scratch.
-
-### Sesi 2 — Adaptasi untuk Padang (9 Jul 2026)
-
-User jelaskan kebutuhan baru:
-
-- Proyek di **Sumatera Barat, Kota Padang**
-- **11 kelurahan**, masing-masing 2 tenaga ahli:
-  - Tenaga Pendamping Persampahan
-  - Tenaga Ahli Kelembagaan
-- Total lapangan: **22 orang**
-- Tujuan: **crosscheck kehadiran** tim pendamping di lapangan
-
-**Keputusan arah adaptasi:**
-- Multi-geofence (bukan single office seperti parent)
-- Fokus monitoring, bukan payroll/cuti/BPJS
-- Firebase project **terpisah** dari Surya Abadi
-- Parent project **tidak diubah**
-
-### Sesi 3 — Sub-project setup + tim kantor (9 Jul 2026)
-
-User minta buat subfolder `ISWMP-SumBar-Padang` sebagai langkah awal.
-
-**Tambahan informasi penting:**
-- Selain 22 TA lapangan, ada **4 orang berkantor di Kota Padang**
-- Lokasi kantor **belum ditentukan** (koordinat TBD)
-- Peran tim kantor:
-  1. **Koordinator Kota (KorKot)** × 1
-  2. **Asisten Manajemen Data** × 1
-  3. **Operator** × 2
-
-Dokumentasi awal dibuat: README, PROJECT_SPEC, ORGANIZATION, DATA_MODEL, KELURAHAN, ROADMAP, `.env.example`.
+- Parent `surya-abadi-connecteam` cocok sebagai fondasi (absensi GPS + selfie + dashboard)
+- 11 kelurahan × 2 TA = 22 lapangan + 4 tim kantor = **26 user absensi**
+- Firebase terpisah, multi-geofence, tanpa payroll/cuti/BPJS
 
 ### Sesi 4 — memory.md (9 Jul 2026)
 
-User minta `memory.md` sebagai jembatan keberlanjutan diskusi.
+File kontinuitas dibuat.
+
+### Sesi 5 — Fork codebase (9 Jul 2026)
+
+- KorKot **tanpa** dashboard admin; registrasi **self-register + approval**
+- Fork parent → rebrand, feature flags, build OK (~1.26 MB)
+
+### Sesi 6 — Input 11 kelurahan (9 Jul 2026)
+
+PDF `Kelurahan ISWMP Padang.pdf` → `docs/KELURAHAN.md` (6 kecamatan, koordinat TBD)
+
+### Sesi 7 — Firebase + multi-geofence (9 Jul 2026)
+
+- `geofenceService.js`, mode transisi geofence, adaptasi Register/CheckIn
+- `docs/FIREBASE_SETUP.md`, `scripts/seed-firestore.mjs`, `firestore.rules` ISWMP
+
+### Sesi 8 — Firebase go-live + registrasi pertama (9–10 Jul 2026)
+
+**Firebase Console selesai:**
+- Web App: `ISWMP SumBar-Padang Web`
+- Auth: Email/Password ✅
+- Firestore: Jakarta ✅
+- Storage: `iswmp-sumbar-padang.firebasestorage.app` ✅
+
+**Development & deploy:**
+- `firebase-tools` via npm (`npx firebase`, `npm run firebase:deploy:rules`)
+- Fix deploy: `storage:rules` → `storage`; `firebase.json` bucket eksplisit
+- Rules + indexes **deployed** ✅
+- `src/config/firebase.credentials.js` — fallback config (fix typo API key `tT` → `tt`)
+- `.env.local` diisi dari Console
+
+**Uji coba berhasil:**
+- Registrasi self-register ✅
+- Manual aktivasi di Firestore (`accountStatus: active`) ✅
+- Login → dashboard employee (`/employee`) ✅
+- Console: `🔥 Firebase project: iswmp-sumbar-padang` ✅
+
+**Belum dilakukan sesi ini:**
+- `npm run seed` (11 kelurahan ke Firestore)
+- Buat akun `admin` terpisah
+- Uji check-in end-to-end
+- Fix minor: `AppUpdateNotification` → `Missing or insufficient permissions`
 
 ---
 
@@ -102,7 +115,6 @@ ISWMP SumBar-Padang
 └── Tenaga Ahli Lapangan (22) ─────── absensi di kelurahan masing-masing
     ├── TA Persampahan (TA_PERSAMP) × 11
     └── TA Kelembagaan (TA_KELEMBAGAAN) × 11
-        └── 11 kelurahan × 2 TA = 22
 ```
 
 ### Kode peran (untuk development)
@@ -122,82 +134,88 @@ ISWMP SumBar-Padang
 
 | # | Keputusan | Alasan |
 |---|-----------|--------|
-| 1 | Fork dari `surya-abadi-connecteam`, bukan from scratch | Hemat waktu; fitur absensi GPS + selfie + dashboard sudah ada |
-| 2 | Subfolder terpisah, parent tidak diubah | Surya Abadi tetap production independen |
-| 3 | Firebase project baru & terpisah | Isolasi data proyek ISWMP |
-| 4 | Koordinat kelurahan di Firestore (`kelurahan` collection) | 11 lokasi, tidak cocok di env vars |
-| 5 | Koordinat kantor di Firestore (`kantor` collection) | Fleksibel saat lokasi TBD |
-| 6 | Modul payroll, cuti, BPJS, location-update **tidak dipakai** | Fokus crosscheck kehadiran |
-| 7 | Foto selfie tetap wajib | Bukti visual kehadiran lapangan |
-| 8 | Fase awal: check-in saja (check-out opsional) | Cukup untuk crosscheck |
-| 9 | Geofence kantor **nonaktif** sampai koordinat ditentukan | Hindari false reject absensi |
+| 1 | Fork dari `surya-abadi-connecteam` | Hemat waktu; fitur absensi sudah ada |
+| 2 | Firebase project `iswmp-sumbar-padang` terpisah | Isolasi data proyek ISWMP |
+| 3 | Koordinat di Firestore (`kelurahan` + `kantor`) | 12 lokasi, fleksibel update |
+| 4 | Modul payroll, cuti, location-update **OFF** | Fokus crosscheck kehadiran |
+| 5 | Self-register + approval admin | Alur registrasi |
+| 6 | KorKot = `office_staff`, **bukan admin** | Hanya absen kantor |
+| 7 | Mode transisi geofence **A** | Absensi tercatat meski koordinat belum ada |
+| 8 | Foto selfie tetap wajib | Bukti visual kehadiran |
+| 9 | Firebase credentials: env + `firebase.credentials.js` fallback | Hindari masalah `.env.local` di dev |
 
 ---
 
 ## Keputusan yang BELUM Final
 
-| # | Pertanyaan | Opsi | Status |
-|---|------------|------|--------|
-| 1 | Apakah KorKot punya akses admin dashboard? | A) role admin + absensi kantor · B) office_staff + permission khusus | ⏳ Tanya user |
-| 2 | Metode registrasi user? | A) Admin buat semua akun · B) Self-register + approval | ⏳ Tanya user |
-| 3 | Apakah Asisten Manajemen Data butuh akses dashboard? | Ya / Tidak | ⏳ Tanya user |
-| 4 | Jam absensi resmi proyek? | Default sementara: 08:00 WIB | ⏳ Tanya user |
-| 5 | Radius geofence default? | 300m kelurahan, 200m kantor (perlu kalibrasi lapangan) | ⏳ Konfirmasi |
-| 6 | Branding UI final? | Draft: "ISWMP SumBar-Padang" | ⏳ Konfirmasi |
+| # | Pertanyaan | Status |
+|---|------------|--------|
+| 1 | Asisten Manajemen Data butuh dashboard? | ⏳ Tanya user |
+| 2 | Jam absensi resmi proyek? | Default: 08:00 WIB — ⏳ konfirmasi |
+| 3 | Radius geofence default? | 300m kelurahan, 200m kantor — ⏳ kalibrasi lapangan |
+| 4 | Branding UI final (logo)? | ⏳ Konfirmasi |
 
 ---
 
 ## Data yang Masih Kosong (Blocker)
 
-| Data | Dampak jika kosong | File target |
-|------|-------------------|-------------|
-| Daftar 11 kelurahan (nama + kecamatan) | Tidak bisa seed geofence | `docs/KELURAHAN.md` |
-| Koordinat GPS per kelurahan | Validasi absensi TA tidak akurat | `docs/KELURAHAN.md` |
-| Koordinat kantor Kota Padang | 4 orang kantor belum bisa validasi GPS | `docs/KELURAHAN.md` + `kantor` collection |
-| Nama/email 26 user | Tidak bisa onboarding | belum ada file |
-| Assign TA per kelurahan | Matriks dashboard kosong | `docs/KELURAHAN.md` |
+| Data | Dampak | Status |
+|------|--------|--------|
+| Daftar 11 kelurahan | Seed geofence | ✅ `docs/KELURAHAN.md` |
+| Koordinat GPS kelurahan | Validasi radius TA | ⏳ TBD |
+| Koordinat kantor Padang | Validasi radius kantor | ⏳ TBD |
+| Seed Firestore (`kelurahan`, `kantor`) | Dropdown/register dari DB | ⏳ jalankan `npm run seed` |
+| Akun admin produksi | Approve registrasi user | ⏳ belum dibuat |
+| Assign nama TA per kelurahan | Matriks dashboard | ⏳ TBD |
+| 26 user onboarding | Data lengkap | ⏳ setelah go-live |
 
 ---
 
-## Adaptasi Teknis dari Parent (Rencana)
+## Adaptasi Teknis — Status Implementasi
 
-| Komponen parent | Perubahan untuk ISWMP |
-|-----------------|----------------------|
-| `src/utils/geolocation.js` | Single office → multi-geofence per `kelurahanId` / `kantorId` |
-| `users` collection | Tambah `assignmentType`, `jenisTenagaAhli`, `peranKantor`, `kelurahanId` |
-| `Register.jsx` | Form penugasan kelurahan/kantor, bukan department/position bebas |
-| `Admin/Dashboard.jsx` | Matriks 11×2 kelurahan + panel 4 kantor |
-| `CheckIn.jsx` | Validasi ke lokasi penugasan user, bukan office global |
-| Payroll, Leave, LocationUpdate | Nonaktifkan / hapus dari routing |
-| Branding UI | Ganti nama, logo, footer |
-
-### Bug parent — status setelah sync GitHub (9 Jul 2026)
-
-- ~~`App.jsx` navigate tanpa import~~ → **sudah diperbaiki** di commit `b96d243`
-- ~~Duplicate Firebase init~~ → **sudah diperbaiki** di commit `cf8ad99`
-- ~~Check-in dobel per hari~~ → **sudah diperbaiki** di commit `5819a5d`
-- `console_log.txt` & markdown clutter → **sudah dihapus** di GitHub (commit `1b9605e`)
+| Komponen | Status |
+|----------|--------|
+| Fork + rebrand UI | ✅ |
+| `projectConfig.js` feature flags | ✅ |
+| `geofenceService.js` multi-geofence | ✅ |
+| `geolocation.js` mode transisi | ✅ |
+| `Register.jsx` ISWMP (kelurahan/kantor) | ✅ |
+| `CheckIn.jsx` + `Employee/Dashboard.jsx` | ✅ |
+| `firestore.rules` ISWMP | ✅ deployed |
+| `storage.rules` | ✅ deployed |
+| `firebase.credentials.js` | ✅ |
+| `Admin/Dashboard.jsx` matriks kelurahan | ⬜ Fase 2 |
+| Seed script `npm run seed` | ✅ script ada, ⬜ belum dijalankan |
+| Logo ISWMP khusus | ⬜ masih icon parent |
 
 ---
 
 ## Peta File Proyek
 
 ```
-github_SA_Connecteam/
-│
-├── surya-abadi-connecteam/          ← PARENT (jangan ubah)
-│   └── [codebase production Surya Abadi Depok]
-│
-└── ISWMP-SumBar-Padang/             ← SUB-PROJECT (aktif)
-    ├── memory.md                    ← FILE INI (baca dulu setiap sesi)
-    ├── README.md                    ← Overview singkat
-    ├── PROJECT_SPEC.md              ← Spesifikasi fungsional & teknis
-    ├── .env.example                 ← Template env (Firebase TBD)
-    └── docs/
-        ├── ORGANIZATION.md          ← Peran 26 user + hierarki
-        ├── DATA_MODEL.md            ← Skema Firestore
-        ├── KELURAHAN.md             ← Master 11 kelurahan (KOSONG)
-        └── ROADMAP.md               ← Fase 0–5 pengembangan
+iswmp-sumbar-padang/
+├── memory.md                         ← FILE INI
+├── README.md
+├── PROJECT_SPEC.md
+├── package.json
+├── .env.example / .env.local         ← config lokal (jangan commit)
+├── .firebaserc                       ← project: iswmp-sumbar-padang
+├── firebase.json
+├── firestore.rules / storage.rules
+├── scripts/seed-firestore.mjs        ← seed kelurahan + kantor
+├── src/
+│   ├── config/
+│   │   ├── firebase.js
+│   │   ├── firebase.credentials.js   ← fallback credentials
+│   │   └── projectConfig.js
+│   ├── data/seedData.js
+│   └── services/geofenceService.js
+└── docs/
+    ├── FIREBASE_SETUP.md             ← panduan setup (updated)
+    ├── KELURAHAN.md                  ← 11 kelurahan ✅
+    ├── DATA_MODEL.md
+    ├── ORGANIZATION.md
+    └── ROADMAP.md
 ```
 
 ---
@@ -206,23 +224,39 @@ github_SA_Connecteam/
 
 | Fase | Status | Isi |
 |------|--------|-----|
-| **0** Setup & docs | 🟡 Sedang berjalan | Subfolder + dokumentasi + memory.md |
-| **1** Core adaptation | ⬜ Belum | Fork code, multi-geofence, model user baru |
-| **2** Dashboard monitoring | ⬜ Belum | Matriks kelurahan + panel kantor |
-| **3** Laporan & export | ⬜ Belum | Excel harian/bulanan per kelurahan |
-| **4** Uji lapangan & go-live | ⬜ Belum | Kalibrasi GPS, training, deploy |
-| **5** Enhancement | ⬜ Belum | WhatsApp alert, peta, cuti, dll. |
+| **0** Setup & docs | ✅ Selesai | |
+| **1** Core adaptation | 🟡 ~80% | Firebase live, register/login OK; seed & check-in uji tersisa |
+| **2** Dashboard monitoring | ⬜ Belum | Matriks 11×2 kelurahan + panel kantor |
+| **3** Laporan & export | ⬜ Belum | Excel per kelurahan |
+| **4** Uji lapangan & go-live | ⬜ Belum | Kalibrasi GPS, deploy Vercel |
+| **5** Enhancement | ⬜ Belum | WhatsApp, peta, dll. |
 
 ---
 
 ## Langkah Berikutnya (Prioritas)
 
-1. **User input:** daftar 11 kelurahan → isi `docs/KELURAHAN.md`
-2. **User input:** koordinat kantor Padang (4 orang)
-3. **User konfirmasi:** akses dashboard KorKot & metode registrasi
-4. **Development:** fork `surya-abadi-connecteam/` → `ISWMP-SumBar-Padang/src/` *(base sudah up-to-date)*
-5. **Development:** setup Firebase project baru
-6. **Development:** implementasi multi-geofence (Fase 1)
+1. **`npm run seed`** — butuh `service-account.json` → isi 11 kelurahan + kantor di Firestore
+2. **Buat akun admin** — register baru → Firestore: `role: admin`, `active: true` (atau upgrade akun terpisah)
+3. **Uji check-in** — mode transisi (GPS + selfie, geofence belum aktif)
+4. **Fix** `AppUpdateNotification` permissions error (minor)
+5. **Input koordinat** kelurahan + kantor saat survei lapangan tersedia
+6. **Fase 2** — dashboard matriks kelurahan untuk admin
+
+### Perintah dev rutin
+
+```bash
+cd ~/iswmp-sumbar-padang
+npm run dev                              # localhost:5173
+npm run firebase:deploy:rules            # deploy rules
+npm run seed                             # seed Firestore (butuh service-account.json)
+```
+
+### Aktivasi user manual (Firestore)
+
+Koleksi `users` → edit dokumen:
+- Approve: `accountStatus: active`, `isActive: true`
+- Jadi admin: tambah `role: admin`
+- Koleksi `registrationRequests` → `status: approved` (opsional)
 
 ---
 
@@ -230,25 +264,28 @@ github_SA_Connecteam/
 
 | Tanggal | Topik | Output |
 |---------|-------|--------|
-| 2026-07-09 | Review parent project Surya Abadi Connecteam | Analisis fitur, bug, rekomendasi |
-| 2026-07-09 | Perencanaan adaptasi Padang (11 kelurahan, 22 TA) | Arsitektur multi-geofence, fase dev |
-| 2026-07-09 | Setup sub-project + 4 tim kantor | Folder + docs awal |
-| 2026-07-09 | Buat memory.md | File kontinuitas ini |
-| 2026-07-09 | Sync parent dengan GitHub | `git pull` — 16 commit, fast-forward ke `1b9605e`, build OK |
-| 2026-07-09 | Push ISWMP ke GitHub (Opsi A) | Repo `firesand/iswmp-sumbar-padang` — commit `45f66f0` |
+| 2026-07-09 | Review parent + perencanaan Padang | Arsitektur multi-geofence |
+| 2026-07-09 | Setup sub-project + docs | Folder + dokumentasi awal |
+| 2026-07-09 | Fork codebase | Rebrand, feature flags, build OK |
+| 2026-07-09 | Input 11 kelurahan (PDF) | `docs/KELURAHAN.md` |
+| 2026-07-09 | Firebase + multi-geofence code | geofenceService, seed script, Register adaptasi |
+| 2026-07-10 | Firebase go-live + registrasi | Auth/Firestore/Storage OK, rules deployed, login OK |
 
 ---
 
 ## Catatan untuk Agent Berikutnya
 
 - User berkomunikasi dalam **Bahasa Indonesia**
-- User adalah developer/pemilik proyek (Hikmahtiar Studio)
+- Developer: Hikmahtiar Studio (`firesand@gmail.com` = akun testing)
 - Jangan commit ke git kecuali diminta eksplisit
-- Jangan ubah folder `surya-abadi-connecteam/` — hanya baca/fork
-- Parent lokal sudah **sync dengan GitHub** (`1b9605e`) — fork dari versi ini
-- Kantor Padang = **1 geofence untuk 4 orang**, bukan 4 geofence terpisah
-- Total absensi bukan 22 saja — **26 orang** (22 lapangan + 4 kantor)
-- Jika user kirim daftar kelurahan, update `docs/KELURAHAN.md` DAN tabel blocker di file ini
+- Jangan commit: `.env.local`, `service-account.json`
+- Firebase CLI: gunakan `npx firebase` atau `npm run firebase:*`, **bukan** `firebase` global
+- API key benar: `AIzaSyCS0zQzf22j4**tt**DA6pYeOlrNxaacZ7Cqk4` (perhatikan `tt` bukan `tT`)
+- `firebase.credentials.js` = fallback jika `.env.local` bermasalah
+- KorKot = `office_staff`, bukan `admin`
+- Kantor = **1 geofence** untuk 4 orang
+- Total absensi = **26** (bukan 22)
+- Firestore masih kosong koleksi `kelurahan` sampai `npm run seed` dijalankan
 
 ---
 
@@ -256,6 +293,6 @@ github_SA_Connecteam/
 
 | Versi | Tanggal | Perubahan |
 |-------|---------|-----------|
-| 0.1.0 | 2026-07-09 | Inisialisasi — konteks sesi 1–3, struktur user, keputusan, blocker |
-| 0.1.1 | 2026-07-09 | Parent sync GitHub (16 commit), update status bug & next steps |
-| 0.1.2 | 2026-07-09 | Git init + push ke github.com/firesand/iswmp-sumbar-padang |
+| 0.3.0 | 2026-07-09 | Firebase guide, multi-geofence, seed script |
+| 0.4.0 | 2026-07-10 | Firebase go-live, rules deployed, registrasi & login OK, testing user KorKot |
+| 0.4.1 | 2026-07-10 | Fix celah GPS: no fallback, no accuracy bypass, audit fields di attendance |

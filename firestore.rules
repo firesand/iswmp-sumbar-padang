@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userDoc().data.role == 'admin';
+    }
+
+    function isActiveUser() {
+      return isSignedIn() && userDoc().data.accountStatus == 'active';
+    }
+
+    // Master data kelurahan — read semua user login, write admin
+    match /kelurahan/{kelurahanId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Master data kantor — read semua user login, write admin
+    match /kantor/{kantorId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Konfigurasi proyek
+    match /projectConfig/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if isSignedIn() &&
+                     (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() &&
+                       (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Registration requests
+    match /registrationRequests/{requestId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Attendance records
+    match /attendances/{attendanceId} {
+      allow create: if isActiveUser();
+      allow read: if isSignedIn() &&
+                     (request.auth.uid == resource.data.userId || isAdmin());
+      allow update: if isSignedIn() &&
+                       request.auth.uid == resource.data.userId;
+      allow delete: if isAdmin();
+    }
+
+    // Deletion logs (audit trail)
+    match /deletionLogs/{logId} {
+      allow create: if isAdmin();
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // App configuration (legacy)
+    match /appConfig/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

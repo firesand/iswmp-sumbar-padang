@@ -2,30 +2,31 @@
 
 ---
 
-## Fase 0 — Setup & Perencanaan ✅ (sedang berjalan)
+## Fase 0 — Setup & Perencanaan ✅
 
 - [x] Buat subfolder proyek `ISWMP-SumBar-Padang/`
 - [x] Dokumentasi spesifikasi awal
 - [x] Definisikan struktur 22 TA lapangan + 4 tim kantor
-- [ ] Input daftar 11 kelurahan
+- [x] Keputusan: KorKot **tidak** akses admin dashboard
+- [x] Keputusan: metode registrasi = **self-register + approval**
+- [x] Input daftar 11 kelurahan
 - [ ] Tentukan koordinat kantor kota Padang
-- [ ] Keputusan: KorKot akses admin dashboard?
-- [ ] Keputusan: metode registrasi user
 
 ---
 
-## Fase 1 — Adaptasi Core (estimasi 1–2 minggu)
+## Fase 1 — Adaptasi Core (estimasi 1–2 minggu) 🟡 sedang berjalan
 
 **Tujuan:** Fork codebase parent + multi-lokasi geofence
 
-- [ ] Fork `surya-abadi-connecteam/` ke subfolder ini
+- [x] Fork `surya-abadi-connecteam/` ke repo ISWMP
+- [x] Rebrand UI (nama proyek, manifest, footer)
+- [x] Nonaktifkan modul: payroll, cuti, BPJS, location update (feature flags)
 - [ ] Setup Firebase project baru (terpisah)
 - [ ] Implementasi koleksi `kelurahan` dan `kantor`
 - [ ] Ubah `geolocation.js` → validasi multi-geofence
 - [ ] Adaptasi model `users` (field_staff / office_staff)
 - [ ] Sesuaikan form registrasi / admin create user
-- [ ] Rebrand UI (nama proyek, logo)
-- [ ] Nonaktifkan modul: payroll, cuti, BPJS, location update
+- [ ] Rebrand UI (logo khusus ISWMP — saat ini masih pakai icon parent)
 
 **Deliverable:** Absensi TA di kelurahan + absensi tim kantor (mode transisi jika koordinat kantor belum ada)
 
@@ -81,8 +82,8 @@
 ## Timeline Visual
 
 ```
-Fase 0  ████░░░░░░  Setup & docs        ← kita di sini
-Fase 1  ░░░░░░░░░░  Core adaptation
+Fase 0  ██████████  Setup & docs        ✅ selesai
+Fase 1  ███░░░░░░░  Core adaptation     ← kita di sini
 Fase 2  ░░░░░░░░░░  Dashboard
 Fase 3  ░░░░░░░░░░  Laporan
 Fase 4  ░░░░░░░░░░  Uji & go-live
@@ -95,6 +96,6 @@ Fase 5  ░░░░░░░░░░  Enhancement
 
 | Blocker | Dampak | Action |
 |---------|--------|--------|
-| Daftar 11 kelurahan belum ada | Tidak bisa seed geofence | Minta daftar resmi dari tim proyek |
+| Daftar 11 kelurahan belum ada | ~~Tidak bisa seed geofence~~ | ✅ Selesai — koordinat masih TBD |
 | Koordinat kantor Padang TBD | 4 orang kantor belum bisa validasi GPS | Mode transisi / manual approval |
 | Koordinat kelurahan belum disurvei | Radius belum akurat | Uji lapangan Fase 4 |

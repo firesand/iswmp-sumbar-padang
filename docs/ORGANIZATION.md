@@ -89,10 +89,7 @@ Berkantor di **Kota Padang**. Lokasi kantor **belum ditentukan** — akan dikonf
 
 ### Catatan peran KorKot
 
-Koordinator Kota kemungkinan juga membutuhkan akses **admin dashboard** untuk monitoring kehadiran seluruh kelurahan. Opsi implementasi:
-
-- **Opsi A:** KorKot = `role: admin` + absensi sebagai office staff
-- **Opsi B:** KorKot = `role: office_staff` dengan permission `canViewDashboard: true`
+**Keputusan (9 Jul 2026):** KorKot = `role: office_staff` + `peranKantor: 'KORKOT'` — **tanpa akses admin dashboard**. Hanya absen di geofence kantor seperti staff kantor lainnya. Monitoring kehadiran dilakukan oleh Admin Sistem (1–2 orang).
 
 *(Keputusan final menunggu konfirmasi)*
 
@@ -113,7 +110,7 @@ Admin proyek (developer / PM) tidak wajib absen.
 ```
 Super Admin
     │
-    ├── KorKot (monitoring + absensi kantor) — akses dashboard?
+    ├── KorKot (absensi kantor saja, tanpa dashboard)
     │
     ├── Asisten Manajemen Data (absensi kantor + data?)
     │
