@@ -5,6 +5,7 @@
 Sub-project sistem absensi & crosscheck kehadiran tim lapangan, dikembangkan dari fondasi [Surya Abadi Connecteam](../surya-abadi-connecteam/).
 
 > **Developer:** Hikmahtiar Studio  
+> **Repository:** https://github.com/firesand/iswmp-sumbar-padang  
 > **Status:** Perencanaan / Setup awal  
 > **Provinsi:** Sumatera Barat  
 > **Wilayah kerja:** Kota Padang (11 kelurahan + kantor kota)
@@ -71,3 +72,20 @@ ISWMP-SumBar-Padang/
 
 Sub-project ini **tidak mengubah** `surya-abadi-connecteam/` yang sudah production.  
 Kode akan di-fork/adaptasi ke folder ini saat fase development dimulai.
+
+---
+
+## Setup di PC Desktop
+
+```bash
+mkdir github_SA_Connecteam && cd github_SA_Connecteam
+
+git clone https://github.com/firesand/surya-abadi-connecteam.git
+git clone https://github.com/firesand/iswmp-sumbar-padang.git ISWMP-SumBar-Padang
+
+cd surya-abadi-connecteam && npm install && cp .env.example .env.local
+# Edit .env.local dengan kredensial Firebase, lalu: npm run dev
+```
+
+Buka folder `github_SA_Connecteam` di Cursor, lalu mulai chat dengan:
+> *"Baca ISWMP-SumBar-Padang/memory.md, lanjutkan proyek."*

@@ -25,6 +25,7 @@
 | **Status saat ini** | Fase 0 — Setup & perencanaan (parent sudah sync GitHub, belum fork codebase) |
 | **Parent commit lokal** | `1b9605e` — sinkron dengan `origin/main` (9 Jul 2026) |
 | **Workspace lokal** | `github_SA_Connecteam/ISWMP-SumBar-Padang/` |
+| **Repo ISWMP (GitHub)** | https://github.com/firesand/iswmp-sumbar-padang |
 | **Parent project** | `github_SA_Connecteam/surya-abadi-connecteam/` |
 | **Repo parent (GitHub)** | https://github.com/firesand/surya-abadi-connecteam |
 | **Production parent** | https://surya-abadi-connecteam.vercel.app |
@@ -234,6 +235,7 @@ github_SA_Connecteam/
 | 2026-07-09 | Setup sub-project + 4 tim kantor | Folder + docs awal |
 | 2026-07-09 | Buat memory.md | File kontinuitas ini |
 | 2026-07-09 | Sync parent dengan GitHub | `git pull` — 16 commit, fast-forward ke `1b9605e`, build OK |
+| 2026-07-09 | Push ISWMP ke GitHub (Opsi A) | Repo `firesand/iswmp-sumbar-padang` — commit `45f66f0` |
 
 ---
 
@@ -256,3 +258,4 @@ github_SA_Connecteam/
 |-------|---------|-----------|
 | 0.1.0 | 2026-07-09 | Inisialisasi — konteks sesi 1–3, struktur user, keputusan, blocker |
 | 0.1.1 | 2026-07-09 | Parent sync GitHub (16 commit), update status bug & next steps |
+| 0.1.2 | 2026-07-09 | Git init + push ke github.com/firesand/iswmp-sumbar-padang |
