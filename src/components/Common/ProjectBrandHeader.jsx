@@ -38,14 +38,7 @@ export default function ProjectBrandHeader({ compact = false }) {
         </div>
       </div>
 
-      <p className={`${compact ? 'mt-3' : 'mt-4'} text-xs font-semibold uppercase tracking-wide text-green-800`}>
-        {PROJECT.ministry}
-      </p>
-      <p className="text-[11px] text-gray-500 mt-0.5">
-        Republik Indonesia
-      </p>
-
-      <div className={`${compact ? 'mt-3' : 'mt-4'} border-t border-gray-100 pt-4`}>
+      <div className={`${compact ? 'mt-4' : 'mt-5'} border-t border-gray-100 pt-4`}>
         <h1 className={`font-bold text-gray-900 ${compact ? 'text-2xl' : 'text-3xl'}`}>
           {PROJECT.name}
         </h1>
