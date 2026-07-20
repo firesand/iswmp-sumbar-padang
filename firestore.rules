@@ -2,6 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Helper functions for security checks
     function isSignedIn() {
       return request.auth != null;
     }
@@ -16,6 +17,23 @@ service cloud.firestore {
 
     function isActiveUser() {
       return isSignedIn() && userDoc().data.accountStatus == 'active';
+    }
+    
+    // Validate user document structure - prevent sensitive field exposure
+    function isValidUserCreate() {
+      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role', 
+                          'accountStatus', 'createdAt', 'createdBy',
+                          'profileImage', 'position', 'department',
+                          'mustChangePassword', 'passwordResetAt', 'passwordResetBy'];
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+    
+    function isValidUserUpdate() {
+      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role', 
+                          'accountStatus', 'profileImage', 'position', 'department',
+                          'mustChangePassword', 'passwordResetAt', 'passwordResetBy',
+                          'lastLoginAt', 'updatedAt', 'updatedBy'];
+      return request.resource.data.keys().hasOnly(allowedFields);
     }
 
     // Master data kelurahan — read semua user login, write admin
@@ -36,33 +54,46 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Users
+    // Users collection with enhanced security
     match /users/{userId} {
+      // Users can read their own doc, admins can read all
       allow read: if isSignedIn() &&
                      (request.auth.uid == userId || isAdmin());
-      allow create: if isSignedIn() && request.auth.uid == userId;
+      
+      // Only allow creation by the user themselves with validated fields
+      allow create: if isSignedIn() && 
+                       request.auth.uid == userId &&
+                       isValidUserCreate();
+      
+      // Updates: self or admin, with field validation
       allow update: if isSignedIn() &&
-                       (request.auth.uid == userId || isAdmin());
+                       (request.auth.uid == userId || isAdmin()) &&
+                       isValidUserUpdate();
+      
+      // Only admins can delete users
       allow delete: if isAdmin();
     }
 
-    // Registration requests
+    // Registration requests - users can create, admins manage
     match /registrationRequests/{requestId} {
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() &&
+                       request.resource.data.keys().hasOnly(['userId', 'requestedBy', 'requestedAt', 'status']);
       allow read, update, delete: if isAdmin();
     }
 
-    // Attendance records
+    // Attendance records with field validation
     match /attendances/{attendanceId} {
-      allow create: if isActiveUser();
+      allow create: if isActiveUser() &&
+                       request.resource.data.keys().hasOnly(['userId', 'timestamp', 'type', 'location', 'photoUrl', 'notes']);
       allow read: if isSignedIn() &&
                      (request.auth.uid == resource.data.userId || isAdmin());
       allow update: if isSignedIn() &&
-                       request.auth.uid == resource.data.userId;
+                       request.auth.uid == resource.data.userId &&
+                       request.resource.data.keys().hasOnly(['location', 'photoUrl', 'notes', 'updatedAt']);
       allow delete: if isAdmin();
     }
 
-    // Deletion logs (audit trail)
+    // Deletion logs (audit trail) - immutable, admin only
     match /deletionLogs/{logId} {
       allow create: if isAdmin();
       allow read: if isAdmin();
@@ -79,6 +110,11 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+    
+    // Default deny rule for any unmatched collections
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
