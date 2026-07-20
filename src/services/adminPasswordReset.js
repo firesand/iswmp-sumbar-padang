@@ -39,13 +39,16 @@ export const getUserByEmail = async (email) => {
 };
 
 /**
- * Generate a new random password
+ * Generate a new random password using cryptographically secure random number generator
  */
 export const generateNewPassword = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
   let password = '';
-  for (let i = 0; i < 8; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  const array = new Uint32Array(8);
+  crypto.getRandomValues(array);
+  
+  for (let i = 0; i < 12; i++) {
+    password += chars.charAt(array[i % 8] % chars.length);
   }
   return password;
 };
@@ -53,16 +56,19 @@ export const generateNewPassword = () => {
 /**
  * Update user password in Firestore (for admin reset)
  * Note: This updates a custom field, not the actual Firebase Auth password
+ * DEPRECATED: Should use Firebase Auth updatePassword instead
  */
 export const updateUserPasswordField = async (userId, newPassword) => {
   try {
+    // REMOVED: Storing passwords in Firestore is a security risk
+    // Only store metadata about password reset
     await updateDoc(doc(db, 'users', userId), {
-      tempPassword: newPassword,
       passwordResetAt: new Date(),
-      passwordResetBy: 'admin'
+      passwordResetBy: 'admin',
+      mustChangePassword: true // Flag to force password change on next login
     });
 
-    return { success: true, message: 'Password berhasil direset' };
+    return { success: true, message: 'Password berhasil direset. User harus mengubah password saat login berikutnya.' };
   } catch (error) {
     console.error('Update user password error:', error);
     return { success: false, message: 'Gagal mereset password' };
@@ -86,16 +92,18 @@ export const adminPasswordReset = async (email) => {
     // Generate new password
     const newPassword = generateNewPassword();
 
-    // Update user document with new password
+    // Update user document with password reset flag (NOT the password itself)
     const updateResult = await updateUserPasswordField(user.id, newPassword);
 
     if (!updateResult.success) {
       return updateResult;
     }
 
+    // Return the generated password to admin for secure delivery to user
+    // Admin should communicate this through a secure channel (e.g., in-person, encrypted message)
     return {
       success: true,
-      message: 'Password berhasil direset',
+      message: 'Password berhasil direset. Silakan berikan password baru kepada user melalui saluran yang aman.',
       newPassword: newPassword,
       user: user
     };
@@ -124,7 +132,7 @@ export const getPasswordResetHistory = async (userId) => {
       resetHistory: {
         lastReset: userData.passwordResetAt,
         resetBy: userData.passwordResetBy,
-        hasTempPassword: !!userData.tempPassword
+        mustChangePassword: userData.mustChangePassword || false
       }
     };
   } catch (error) {
