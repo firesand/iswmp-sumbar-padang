@@ -22,6 +22,10 @@ import { validateLocationForUser } from '../../services/geofenceService';
 import { PROJECT } from '../../config/projectConfig';
 import ClearCacheButton from '../Common/ClearCacheButton';
 import { compressAttendancePhoto } from '../../utils/compressAttendancePhoto';
+import DevicePermissionGuide, {
+  isIOSDevice,
+  isPermissionDeniedMessage,
+} from '../Common/DevicePermissionGuide';
 
 function EmployeeDashboard() {
   const navigate = useNavigate();
@@ -45,6 +49,9 @@ function EmployeeDashboard() {
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraMode, setCameraMode] = useState('idle'); // idle | preview | native | failed
   const [cameraHint, setCameraHint] = useState('');
+  const [permissionGuideOpen, setPermissionGuideOpen] = useState(false);
+  const [permissionGuideFocus, setPermissionGuideFocus] = useState('both'); // location | camera | both
+  const [pendingCheckType, setPendingCheckType] = useState('');
 
   // Utility function untuk deteksi browser dan device
   const detectDevice = () => {
@@ -182,12 +189,33 @@ function EmployeeDashboard() {
     setLocationError('');
     setLocationValidation(null);
     if (!result.isValid) {
-      setLocationError(result.message || `Anda berada ${result.distance}m dari lokasi penugasan. Maksimal ${result.maxRadius}m.`);
+      const msg = result.message || `Anda berada ${result.distance}m dari lokasi penugasan. Maksimal ${result.maxRadius}m.`;
+      setLocationError(msg);
+      if (isPermissionDeniedMessage(msg, result.code)) {
+        setPermissionGuideFocus('location');
+        setPermissionGuideOpen(true);
+      }
       return false;
     }
     setLocation(result.location);
     setLocationValidation(result);
     return true;
+  };
+
+  const openPermissionGuide = (focus = 'both') => {
+    setPermissionGuideFocus(focus);
+    setPermissionGuideOpen(true);
+  };
+
+  const handlePermissionRetry = async () => {
+    setPermissionGuideOpen(false);
+    setLocationError('');
+    if (pendingCheckType) {
+      await startCamera(pendingCheckType);
+      return;
+    }
+    // Hanya uji lokasi ulang
+    await validateLocation();
   };
 
   const stopMediaStream = (stream) => {
@@ -301,6 +329,13 @@ function EmployeeDashboard() {
       setCameraHint(
         'Preview di aplikasi tidak tersedia di HP ini. Gunakan tombol "Buka Kamera HP" di bawah.'
       );
+      if (
+        error?.name === 'NotAllowedError' ||
+        error?.name === 'PermissionDeniedError' ||
+        isPermissionDeniedMessage(error?.message || '', error?.name)
+      ) {
+        openPermissionGuide('camera');
+      }
     } finally {
       setCameraStarting(false);
     }
@@ -310,6 +345,7 @@ function EmployeeDashboard() {
   // On Android/iOS prefer native camera (reliable on foldables / Android 16).
   const startCamera = async (type) => {
     setCheckType(type);
+    setPendingCheckType(type);
     setLocationError('');
     setCameraStarting(true);
     setCameraMode('idle');
@@ -770,15 +806,31 @@ function EmployeeDashboard() {
 
     {locationError && (
       <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-      <p className="text-red-600 flex items-center">
-      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
-      {locationError}
-      </p>
+        <p className="text-red-600 flex items-start">
+          <svg className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span>{locationError}</span>
+        </p>
+        {isPermissionDeniedMessage(locationError) && (
+          <button
+            type="button"
+            onClick={() => openPermissionGuide(isIOSDevice() ? 'both' : 'location')}
+            className="mt-3 w-full py-2.5 px-3 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+          >
+            {isIOSDevice() ? 'Panduan izinkan Lokasi & Kamera (iPhone)' : 'Cara izinkan akses lokasi'}
+          </button>
+        )}
       </div>
     )}
     </div>
+
+    <DevicePermissionGuide
+      open={permissionGuideOpen}
+      focus={permissionGuideFocus}
+      onClose={() => setPermissionGuideOpen(false)}
+      onRetry={handlePermissionRetry}
+    />
 
     <input
       ref={fileInputRef}
@@ -828,6 +880,13 @@ function EmployeeDashboard() {
           <p className="text-sm text-green-900 font-medium">
             Gunakan kamera HP (lebih stabil di Android)
           </p>
+          <button
+            type="button"
+            onClick={() => openPermissionGuide('both')}
+            className="mt-2 text-sm text-green-800 underline"
+          >
+            Lokasi/kamera diblokir? Buka panduan Settings
+          </button>
         </div>
       )}
 
