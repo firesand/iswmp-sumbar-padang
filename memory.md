@@ -120,7 +120,8 @@ ISWMP SumBar-Padang
 ├── Tim Kantor Kota Padang (4) ────── absensi di 1 geofence kantor (TBD)
 │   ├── KorKot (KORKOT) × 1
 │   ├── Asisten Manajemen Data (ASMAN_DATA) × 1
-│   └── Operator (OPERATOR) × 2
+│   ├── Operator (OPERATOR) × 2
+│   └── Office Boy (OFFICE_BOY) × 1
 │
 └── Tenaga Ahli Lapangan (22) ─────── absensi di kelurahan masing-masing
     ├── TA Persampahan (TA_PERSAMP) × 11
@@ -137,6 +138,7 @@ ISWMP SumBar-Padang
 | `office_staff` + `KORKOT` | Koordinator Kota | kantor |
 | `office_staff` + `ASMAN_DATA` | Asisten Manajemen Data | kantor |
 | `office_staff` + `OPERATOR` | Operator | kantor |
+| `office_staff` + `OFFICE_BOY` | Office Boy | kantor |
 
 ---
 

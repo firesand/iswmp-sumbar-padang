@@ -28,7 +28,7 @@ function Register() {
     staffCategory: '',       // 'field_staff' | 'office_staff'
     kelurahanId: '',
     jenisTenagaAhli: '',     // TA_PERSAMP | TA_KELEMBAGAAN
-    peranKantor: '',         // KORKOT | ASMAN_DATA | OPERATOR
+    peranKantor: '',         // KORKOT | ASMAN_DATA | OPERATOR | OFFICE_BOY
   });
   const [photo, setPhoto] = useState(null);
   const [loading, setLoading] = useState(false);

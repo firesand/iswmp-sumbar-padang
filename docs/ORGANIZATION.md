@@ -7,9 +7,9 @@
 | Kategori | Jumlah | Lokasi kerja | Tipe absensi |
 |----------|--------|--------------|--------------|
 | Tenaga Ahli Lapangan | 22 | 11 kelurahan | Geofence kelurahan |
-| Tim Kantor Kota Padang | 4 | Kantor kota *(TBD)* | Geofence kantor |
+| Tim Kantor Kota Padang | 5 | Kantor kota *(TBD)* | Geofence kantor |
 | Admin Sistem | 1–2 | — | Tidak absen / opsional |
-| **Total** | **27–28** | | |
+| **Total** | **28–29** | | |
 
 ---
 
@@ -56,7 +56,7 @@ Kelurahan [N]
 
 ---
 
-## 2. Tim Kantor Kota Padang (4 orang)
+## 2. Tim Kantor Kota Padang (5 orang)
 
 Berkantor di **Kota Padang**. Lokasi kantor **belum ditentukan** — akan dikonfigurasi sebagai satu geofence setelah koordinat tersedia.
 
@@ -67,6 +67,7 @@ Berkantor di **Kota Padang**. Lokasi kantor **belum ditentukan** — akan dikonf
 | 1 | Koordinator Kota (KorKot) | `KORKOT` | 1 |
 | 2 | Asisten Manajemen Data | `ASMAN_DATA` | 1 |
 | 3 | Operator | `OPERATOR` | 2 |
+| 4 | Office Boy | `OFFICE_BOY` | 1 |
 
 ### Atribut user (kantor)
 
@@ -75,7 +76,7 @@ Berkantor di **Kota Padang**. Lokasi kantor **belum ditentukan** — akan dikonf
   role: 'office_staff',
   assignmentType: 'kantor',
   kantorId: 'kantor-padang-kota',
-  peranKantor: 'KORKOT' | 'ASMAN_DATA' | 'OPERATOR',
+  peranKantor: 'KORKOT' | 'ASMAN_DATA' | 'OPERATOR' | 'OFFICE_BOY',
   provinsi: 'Sumatera Barat',
   kota: 'Padang'
 }
@@ -83,7 +84,7 @@ Berkantor di **Kota Padang**. Lokasi kantor **belum ditentukan** — akan dikonf
 
 ### Aturan absensi
 
-- Absen di **kantor kota Padang** (satu lokasi untuk ke-4 orang)
+- Absen di **kantor kota Padang** (satu lokasi untuk ke-5 orang)
 - Geofence aktif setelah koordinat kantor ditentukan
 - Sementara koordinat belum ada: absensi bisa mode **manual approval** atau **GPS tanpa validasi radius** (fase transisi)
 
@@ -112,9 +113,11 @@ Super Admin
     │
     ├── KorKot (absensi kantor saja, tanpa dashboard)
     │
-    ├── Asisten Manajemen Data (absensi kantor + data?)
+    ├── Asisten Manajemen Data (absensi kantor)
     │
     ├── 2× Operator (absensi kantor)
+    │
+    ├── Office Boy (absensi kantor)
     │
     └── 22× Tenaga Ahli Lapangan (absensi kelurahan)
             ├── 11× TA Persampahan
@@ -132,6 +135,7 @@ Super Admin
 | KorKot | 1 | Kantor kota Padang | 1 geofence (TBD) |
 | Asisten Manajemen Data | 1 | Kantor kota Padang | 1 geofence (TBD) |
 | Operator | 2 | Kantor kota Padang | 1 geofence (TBD) |
+| Office Boy | 1 | Kantor kota Padang | 1 geofence (TBD) |
 
 **Total geofence: 12** (11 kelurahan + 1 kantor)
 

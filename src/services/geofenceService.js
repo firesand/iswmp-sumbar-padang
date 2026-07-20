@@ -75,6 +75,7 @@ export const OFFICE_STAFF_ROLES = [
   { value: 'KORKOT', label: 'Koordinator Kota (KorKot)' },
   { value: 'ASMAN_DATA', label: 'Asisten Manajemen Data' },
   { value: 'OPERATOR', label: 'Operator' },
+  { value: 'OFFICE_BOY', label: 'Office Boy' },
 ];
 
 export const FIELD_STAFF_TYPES = [

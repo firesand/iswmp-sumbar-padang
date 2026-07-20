@@ -24,8 +24,8 @@ Aplikasi ini berfungsi sebagai **alat crosscheck kehadiran** tim proyek ISWMP di
 | Kategori | Jumlah | Lokasi absensi |
 |----------|--------|----------------|
 | Tenaga Ahli Lapangan | 22 | 11 kelurahan (2 TA per kelurahan) |
-| Tim Kantor Kota Padang | 4 | Kantor kota *(koordinat belum ditentukan)* |
-| **Total pengguna absensi** | **26** | — |
+| Tim Kantor Kota Padang | 5 | Kantor kota *(koordinat belum ditentukan)* |
+| **Total pengguna absensi** | **27** | — |
 
 Detail peran: [docs/ORGANIZATION.md](./docs/ORGANIZATION.md) · daftar nama: [docs/PERSONIL.md](./docs/PERSONIL.md)
 

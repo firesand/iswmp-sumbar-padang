@@ -46,6 +46,7 @@ Berkantor di Kota Padang. **Lokasi kantor belum ditentukan** — geofence akan d
 | Koordinator Kota | `KORKOT` | 1 | Koordinasi operasional di tingkat kota |
 | Asisten Manajemen Data | `ASMAN_DATA` | 1 | Pengelolaan data proyek |
 | Operator | `OPERATOR` | 2 | Operasional kantor |
+| Office Boy | `OFFICE_BOY` | 1 | Dukungan operasional kantor |
 
 - Absensi di **kantor kota Padang** (satu geofence, setelah koordinat ditentukan)
 - Peran berbeda, lokasi absensi sama

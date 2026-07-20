@@ -110,7 +110,7 @@ Koordinat provisional tetap disimpan agar development dan seed bisa berjalan, te
 {
   assignmentType: "kantor",
   kantorId: "kantor-padang-kota",   // ref → kantor.id
-  peranKantor: "KORKOT" | "ASMAN_DATA" | "OPERATOR",
+  peranKantor: "KORKOT" | "ASMAN_DATA" | "OPERATOR" | "OFFICE_BOY",
   provinsi: "Sumatera Barat",
   kota: "Padang"
 }
@@ -144,7 +144,7 @@ Koordinat provisional tetap disimpan agar development dan seed bisa berjalan, te
   kelurahanNama: string | null,
   jenisTenagaAhli: string | null,   // TA_PERSAMP | TA_KELEMBAGAAN
   kantorId: string | null,
-  peranKantor: string | null,       // KORKOT | ASMAN_DATA | OPERATOR
+  peranKantor: string | null,       // KORKOT | ASMAN_DATA | OPERATOR | OFFICE_BOY
 
   // Absensi
   date: "2026-07-09",               // YYYY-MM-DD
@@ -206,7 +206,7 @@ kelurahan (11)
     └── users.field_staff (22) ──→ attendances
 
 kantor (1)
-    └── users.office_staff (4) ──→ attendances
+    └── users.office_staff (5) ──→ attendances
 
 users.admin (1-2) ──→ read all attendances
 ```

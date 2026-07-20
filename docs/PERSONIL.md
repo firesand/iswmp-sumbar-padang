@@ -10,19 +10,21 @@ Disimpan sebagai referensi onboarding/absensi. **Belum diimpor ke Firebase Auth/
 | KOORDINATOR | `office_staff` | `kantor` → `kantor-padang-kota` | `peranKantor: KORKOT` |
 | ASMANDAT | `office_staff` | `kantor` → `kantor-padang-kota` | `peranKantor: ASMAN_DATA` |
 | OPERATOR | `office_staff` | `kantor` → `kantor-padang-kota` | `peranKantor: OPERATOR` |
+| OFFICE BOY | `office_staff` | `kantor` → `kantor-padang-kota` | `peranKantor: OFFICE_BOY` |
 | PPM | `field_staff` | `kelurahan` *(TBD per orang)* | `jenisTenagaAhli: TA_PERSAMP` |
 | PPL | `field_staff` | `kelurahan` *(TBD per orang)* | `jenisTenagaAhli: TA_KELEMBAGAAN` |
 
-**Konfirmasi (20 Jul 2026):** PPM = `TA_PERSAMP`, PPL = `TA_KELEMBAGAAN`.
+**Konfirmasi (20 Jul 2026):** PPM = `TA_PERSAMP`, PPL = `TA_KELEMBAGAAN`.  
+**Update (20 Jul 2026):** Office Boy ditambahkan — absensi di geofence kantor yang sama dengan KorKot / Asman Dat / Operator.
 
 ## Ringkasan
 
 | Kategori | Jumlah |
 |----------|--------|
-| Tim kantor (KorKot + Asman Dat + Operator) | 4 |
+| Tim kantor (KorKot + Asman Dat + Operator + Office Boy) | 5 |
 | PPM (`TA_PERSAMP`) | 11 |
 | PPL (`TA_KELEMBAGAAN`) | 11 |
-| **Total** | **26** |
+| **Total** | **27** |
 
 ## Data yang masih kurang untuk akun absensi
 
@@ -42,6 +44,7 @@ Lihat master kelurahan: [KELURAHAN.md](./KELURAHAN.md) · struktur peran: [ORGAN
 | 2 | ABDUL AZIS SIKUMBANG | ASMANDAT | `ASMAN_DATA` | 81266966866 | 1987-11-25 | S1 Sistem Informasi UPI YPTK Padang |
 | 3 | MAIZUL HAMDI | OPERATOR | `OPERATOR` | 81275540614 | 1988-05-18 | S1 Sistem Informasi UPI YPTK Padang |
 | 4 | RIZA FEBRIYAN | OPERATOR | `OPERATOR` | 81338062209 | 1985-02-21 | DIII Universitas Andalas |
+| — | *TBD* | OFFICE BOY | `OFFICE_BOY` | *TBD* | — | — |
 
 ## 2. PPM — Tenaga Pendamping Persampahan (`TA_PERSAMP`) (11)
 
