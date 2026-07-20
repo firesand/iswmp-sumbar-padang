@@ -11,13 +11,27 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { sendWhatsAppDirect, sendBulkWhatsApp } from './whatsappService';
-import { sendDailyReminder, sendBulkEmails } from './emailService';
+import {
+  sendWhatsAppDirect,
+  sendBulkWhatsApp,
+  sendDailyReminder as sendWhatsAppDailyReminder,
+} from './whatsappService';
+import {
+  sendDailyReminder as sendEmailDailyReminder,
+  sendBulkEmails,
+} from './emailService';
+import { getAppUrl } from '../config/projectConfig';
 
 /**
  * Daily Reminder Service
  * Handles sending daily reminders to employees with flexible options
  */
+
+const employeePhone = (employee) =>
+  employee?.phoneNumber || employee?.phone || '';
+
+const employeeName = (employee) =>
+  employee?.name || employee?.displayName || 'User';
 
 // ============================================
 // REMINDER CONFIGURATION
@@ -35,8 +49,6 @@ export const REMINDER_METHODS = {
   WHATSAPP: 'whatsapp',
   EMAIL: 'email',
   BOTH: 'both',
-  WHATSAPP_ONLY: 'whatsapp_only',
-  EMAIL_ONLY: 'email_only'
 };
 
 // ============================================
@@ -127,20 +139,24 @@ export const getEmployeeById = async (employeeId) => {
 export const sendReminderToEmployee = async (employee, method = 'both') => {
   const results = {
     employeeId: employee.id,
-    employeeName: employee.name,
+    employeeName: employeeName(employee),
     whatsapp: null,
     email: null,
     success: false
   };
 
   try {
-    // WhatsApp reminder
-    if (method === 'whatsapp' || method === 'both' || method === 'whatsapp_only') {
-      if (employee.phoneNumber) {
-        const whatsappResult = sendDailyReminder(employee.phoneNumber, employee.name);
+    const wantsWhatsApp = method === 'whatsapp' || method === 'both' || method === 'whatsapp_only';
+    const wantsEmail = method === 'email' || method === 'both' || method === 'email_only';
+
+    // WhatsApp reminder (opens wa.me — not server-side send)
+    if (wantsWhatsApp) {
+      const phone = employeePhone(employee);
+      if (phone) {
+        const link = sendWhatsAppDailyReminder(phone, employeeName(employee));
         results.whatsapp = {
           success: true,
-          link: whatsappResult
+          link
         };
       } else {
         results.whatsapp = {
@@ -151,9 +167,9 @@ export const sendReminderToEmployee = async (employee, method = 'both') => {
     }
 
     // Email reminder
-    if (method === 'email' || method === 'both' || method === 'email_only') {
+    if (wantsEmail) {
       if (employee.email) {
-        const emailResult = await sendDailyReminder(employee.email, employee.name);
+        const emailResult = await sendEmailDailyReminder(employee.email, employeeName(employee));
         results.email = emailResult;
       } else {
         results.email = {
@@ -166,7 +182,9 @@ export const sendReminderToEmployee = async (employee, method = 'both') => {
     // Log reminder sent
     await logReminderSent(employee.id, method, results);
 
-    results.success = true;
+    const waOk = !wantsWhatsApp || results.whatsapp?.success;
+    const emailOk = !wantsEmail || results.email?.success;
+    results.success = waOk || emailOk;
     return results;
 
   } catch (error) {
@@ -188,45 +206,45 @@ export const sendBulkReminders = async (employees, method = 'both') => {
   const whatsappRecipients = [];
   const emailRecipients = [];
 
-  // Separate recipients by method
-  employees.forEach(employee => {
-    if (method === 'whatsapp' || method === 'both' || method === 'whatsapp_only') {
-      if (employee.phoneNumber) {
+  const wantsWhatsApp = method === 'whatsapp' || method === 'both' || method === 'whatsapp_only';
+  const wantsEmail = method === 'email' || method === 'both' || method === 'email_only';
+
+  employees.forEach((employee) => {
+    if (wantsWhatsApp) {
+      const phone = employeePhone(employee);
+      if (phone) {
         whatsappRecipients.push({
-          phone: employee.phoneNumber,
-          name: employee.name
+          phone,
+          name: employeeName(employee)
         });
       }
     }
 
-    if (method === 'email' || method === 'both' || method === 'email_only') {
-      if (employee.email) {
-        emailRecipients.push({
-          email: employee.email,
-          name: employee.name
-        });
-      }
+    if (wantsEmail && employee.email) {
+      emailRecipients.push({
+        email: employee.email,
+        name: employeeName(employee)
+      });
     }
   });
 
-  // Send WhatsApp messages
   if (whatsappRecipients.length > 0) {
-    const whatsappResults = sendBulkWhatsApp(whatsappRecipients, 
-      `Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-17:00 WIB`);
-    
+    const whatsappResults = await sendBulkWhatsApp(
+      whatsappRecipients,
+      `Pagi {name}! Jangan lupa check-in hari ini ya.\n\nJam kerja: 08:00-17:00 WIB\nLogin: ${getAppUrl()}`
+    );
     results.push(...whatsappResults);
   }
 
-  // Send email messages
   if (emailRecipients.length > 0) {
-    const emailResults = await sendBulkEmails(emailRecipients, 
+    const emailResults = await sendBulkEmails(
+      emailRecipients,
       'Reminder: Check-in Hari Ini',
-      'Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-17:00 WIB');
-    
+      `Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-17:00 WIB\n\nLogin: ${getAppUrl()}`
+    );
     results.push(...emailResults);
   }
 
-  // Log bulk reminder
   await logBulkReminderSent(employees.length, method, results);
 
   return results;

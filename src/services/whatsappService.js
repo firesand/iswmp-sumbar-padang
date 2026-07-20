@@ -8,25 +8,54 @@
 import { PROJECT, getAppUrl, getAdminUrl } from '../config/projectConfig';
 import { ADMIN_CONFIG, WHATSAPP_TEMPLATES } from '../config/adminConfig';
 
+export const formatPhoneNumber = (phoneNumber) => {
+  if (!phoneNumber) return '';
+
+  // Keep digits only
+  let cleaned = String(phoneNumber).replace(/\D/g, '');
+
+  // 62xxxxxxxxxx already OK
+  if (cleaned.startsWith('62')) {
+    return cleaned;
+  }
+
+  // 08xxxxxxxxxx → 628xxxxxxxxxx
+  if (cleaned.startsWith('0')) {
+    return '62' + cleaned.substring(1);
+  }
+
+  // 8xxxxxxxxxx (common in Excel / forms) → 628xxxxxxxxxx
+  if (cleaned.startsWith('8') && cleaned.length >= 9 && cleaned.length <= 13) {
+    return '62' + cleaned;
+  }
+
+  return cleaned;
+};
+
 export const sendWhatsAppDirect = (phoneNumber, message) => {
-  const formattedNumber = phoneNumber.startsWith('0')
-    ? '62' + phoneNumber.substring(1)
-    : phoneNumber.startsWith('+')
-      ? phoneNumber.substring(1)
-      : phoneNumber;
+  const formattedNumber = formatPhoneNumber(phoneNumber);
+  if (!formattedNumber) {
+    throw new Error('Nomor WhatsApp kosong atau tidak valid');
+  }
 
   const waLink = `https://wa.me/${formattedNumber}?text=${encodeURIComponent(message)}`;
-  window.open(waLink, '_blank');
+  const opened = window.open(waLink, '_blank');
+  if (!opened) {
+    // Popup blocked — still return link so UI can show it
+    console.warn('Popup blocked for WhatsApp link:', waLink);
+  }
   return waLink;
 };
 
 export const notifyApprovalViaWhatsApp = (employeeData, status = 'approved') => {
+  const phone = employeeData.phoneNumber || employeeData.phone;
+  const name = employeeData.name || employeeData.displayName || 'User';
   const message =
     status === 'approved'
-      ? WHATSAPP_TEMPLATES.approval(employeeData.name, employeeData.email)
-      : WHATSAPP_TEMPLATES.rejection(employeeData.name);
+      ? WHATSAPP_TEMPLATES.approval(name, employeeData.email)
+      : WHATSAPP_TEMPLATES.rejection(name);
 
-  return sendWhatsAppDirect(employeeData.phoneNumber, message);
+  return sendWhatsAppDirect(phone, message);
 };
 
 export const notifyLateCheckIn = (adminPhone, employeeName, checkInTime) => {
@@ -65,45 +94,36 @@ Generated: ${new Date().toLocaleString('id-ID')}
   return sendWhatsAppDirect(phoneNumber, message);
 };
 
-export const sendBulkWhatsApp = (recipients, messageTemplate) => {
+export const sendBulkWhatsApp = async (recipients, messageTemplate) => {
   const results = [];
-  let successCount = 0;
 
-  recipients.forEach((recipient, index) => {
-    setTimeout(() => {
-      try {
-        const personalizedMessage = messageTemplate.replace('{name}', recipient.name);
-        const link = sendWhatsAppDirect(recipient.phone, personalizedMessage);
-        results.push({
-          recipient: recipient.name,
-          phone: recipient.phone,
-          status: 'sent',
-          link,
-        });
-        successCount++;
-        console.log(`Sent ${successCount}/${recipients.length} messages`);
-      } catch (error) {
-        results.push({
-          recipient: recipient.name,
-          phone: recipient.phone,
-          status: 'failed',
-          error: error.message,
-        });
-      }
-    }, index * 2000);
-  });
+  for (let index = 0; index < recipients.length; index++) {
+    const recipient = recipients[index];
+    try {
+      const personalizedMessage = messageTemplate.replace(/\{name\}/g, recipient.name || 'User');
+      const link = sendWhatsAppDirect(recipient.phone, personalizedMessage);
+      results.push({
+        recipient: recipient.name,
+        phone: recipient.phone,
+        status: 'sent',
+        link,
+      });
+    } catch (error) {
+      results.push({
+        recipient: recipient.name,
+        phone: recipient.phone,
+        status: 'failed',
+        error: error.message,
+      });
+    }
+
+    // Give WhatsApp / browser time between tabs (also reduces popup-block bursts)
+    if (index < recipients.length - 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
 
   return results;
-};
-
-export const formatPhoneNumber = (phoneNumber) => {
-  let cleaned = phoneNumber.replace(/\D/g, '');
-  if (cleaned.startsWith('0')) {
-    cleaned = '62' + cleaned.substring(1);
-  } else if (!cleaned.startsWith('62')) {
-    cleaned = '62' + cleaned;
-  }
-  return cleaned;
 };
 
 export const generateWhatsAppQR = (phoneNumber, message) => {

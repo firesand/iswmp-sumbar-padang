@@ -278,23 +278,59 @@ function AdminDashboard() {
   const sendDailyReminders = async () => {
     const activeEmployees = employees.filter(emp => emp.accountStatus === 'active');
     let sent = 0;
+    let skippedNoPhone = 0;
+    const links = [];
+
+    const wantsWhatsApp = notificationSettings.method === 'whatsapp' || notificationSettings.method === 'both';
+    const wantsEmail = notificationSettings.method === 'email' || notificationSettings.method === 'both';
+
+    if (!wantsWhatsApp && !wantsEmail) {
+      alert('Pilih metode notifikasi WhatsApp / Email di pengaturan atas dulu.');
+      return;
+    }
+
+    if (wantsWhatsApp) {
+      alert(
+        'Browser akan membuka tab WhatsApp per penerima.\n\n' +
+          'Izinkan pop-up untuk situs ini jika diminta.\n' +
+          'Kirim pesan manual di WhatsApp yang terbuka.'
+      );
+    }
 
     for (const employee of activeEmployees) {
-      if (employee.phoneNumber && (notificationSettings.method === 'whatsapp' || notificationSettings.method === 'both')) {
-        sendDailyReminder(employee.phoneNumber, employee.name);
-        sent++;
+      const phone = employee.phoneNumber || employee.phone;
+      const name = employee.name || employee.displayName || 'User';
+
+      if (wantsWhatsApp) {
+        if (phone) {
+          try {
+            const link = sendDailyReminder(phone, name);
+            links.push(link);
+            sent++;
+            await new Promise((r) => setTimeout(r, 1200));
+          } catch (e) {
+            console.error('WhatsApp reminder failed:', e);
+          }
+        } else {
+          skippedNoPhone++;
+        }
       }
 
-      if (employee.email && (notificationSettings.method === 'email' || notificationSettings.method === 'both')) {
+      if (wantsEmail && employee.email) {
         await sendNotification('reminder', {
-          name: employee.name,
+          name,
           email: employee.email
         });
         sent++;
       }
     }
 
-    alert(`Daily reminders sent to ${sent} employees!`);
+    alert(
+      `Reminder diproses.\n\n` +
+        `Berhasil dibuka/dikirim: ${sent}\n` +
+        `Tanpa nomor HP: ${skippedNoPhone}\n\n` +
+        `Catatan: WhatsApp tidak terkirim otomatis — admin harus tekan Kirim di tiap tab WhatsApp.`
+    );
   };
 
   // Approve registration with notifications

@@ -20,7 +20,7 @@ function DailyReminderPanel() {
   
   // Form state
   const [reminderType, setReminderType] = useState('all');
-  const [reminderMethod, setReminderMethod] = useState('both');
+  const [reminderMethod, setReminderMethod] = useState('whatsapp');
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -138,9 +138,19 @@ function DailyReminderPanel() {
 
       // Show success message
       if (result.successCount > 0) {
-        alert(`Reminders sent successfully!\n\nTotal: ${result.totalEmployees}\nSuccess: ${result.successCount}\nFailed: ${result.failedCount}`);
+        alert(
+          `Reminder diproses.\n\n` +
+            `Total: ${result.totalEmployees}\n` +
+            `Sukses: ${result.successCount}\n` +
+            `Gagal: ${result.failedCount}\n\n` +
+            `Catatan: WhatsApp membuka tab wa.me — tekan Kirim di WhatsApp. Izinkan pop-up jika diminta.`
+        );
       } else {
-        alert('Failed to send reminders. Please check the results.');
+        alert(
+          'Gagal mengirim reminder.\n\n' +
+            (result.error || 'Pastikan karyawan punya nomor HP dan metode WhatsApp dipilih.') +
+            '\nCek detail di panel hasil.'
+        );
       }
 
     } catch (error) {
@@ -173,7 +183,7 @@ function DailyReminderPanel() {
 
   const resetForm = () => {
     setReminderType('all');
-    setReminderMethod('both');
+    setReminderMethod('whatsapp');
     setSelectedEmployees([]);
     setSelectedDepartment('');
     setSelectedEmployeeId('');
