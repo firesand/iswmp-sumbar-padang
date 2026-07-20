@@ -16,6 +16,9 @@ export const PROJECT = {
   /** Brand assets di /public */
   logoMinistry: '/logo-kementerian-pu.svg',
   logoMinistryWordmark: '/logo-kementerian-pu-dark.png',
+  logoApp: '/logo192.png',
+  logoAppFallback: '/logo.png',
+  partnerBrand: 'Surya Abadi',
 };
 
 export const getAppUrl = () => PROJECT.appUrl;

@@ -1,19 +1,41 @@
 import { PROJECT } from '../../config/projectConfig';
 
 /**
- * Branding header untuk Login / Register — logo Kementerian PU + nama proyek ISWMP.
+ * Branding header — logo Kementerian PU + logo Surya Abadi + nama proyek ISWMP.
  */
 export default function ProjectBrandHeader({ compact = false }) {
+  const logoH = compact ? 'h-14' : 'h-16';
+
   return (
     <div className={`text-center ${compact ? 'mb-6' : 'mb-8'}`}>
-      <div className="flex justify-center">
-        <img
-          src={PROJECT.logoMinistry}
-          alt={PROJECT.ministry}
-          className={compact ? 'h-16 w-auto' : 'h-20 w-auto'}
-          width={compact ? 72 : 90}
-          height={compact ? 82 : 102}
-        />
+      <div className="flex items-center justify-center gap-4 sm:gap-6">
+        <div className="flex flex-col items-center gap-1.5">
+          <img
+            src={PROJECT.logoMinistry}
+            alt={PROJECT.ministry}
+            className={`${logoH} w-auto`}
+          />
+          <span className="text-[10px] font-medium text-gray-500 max-w-[88px] leading-tight">
+            Kementerian PU
+          </span>
+        </div>
+
+        <div className="h-12 w-px bg-gray-200" aria-hidden="true" />
+
+        <div className="flex flex-col items-center gap-1.5">
+          <img
+            src={PROJECT.logoApp}
+            alt={PROJECT.partnerBrand}
+            className={`${logoH} w-auto rounded-lg object-contain`}
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = PROJECT.logoAppFallback;
+            }}
+          />
+          <span className="text-[10px] font-medium text-gray-500 max-w-[88px] leading-tight">
+            {PROJECT.partnerBrand}
+          </span>
+        </div>
       </div>
 
       <p className={`${compact ? 'mt-3' : 'mt-4'} text-xs font-semibold uppercase tracking-wide text-green-800`}>
