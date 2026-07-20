@@ -14,6 +14,7 @@ import { cspErrorHandler } from '../../utils/cspErrorHandler.js';
 import { KELURAHAN_SEED } from '../../data/seedData.js';
 import { FIELD_STAFF_TYPES, OFFICE_STAFF_ROLES } from '../../services/geofenceService.js';
 import { PROJECT } from '../../config/projectConfig.js';
+import ProjectBrandHeader from '../Common/ProjectBrandHeader.jsx';
 
 function Register() {
   const navigate = useNavigate();
@@ -685,16 +686,17 @@ function Register() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+        <div className="bg-white shadow-lg rounded-lg p-6 mb-2">
+          <ProjectBrandHeader compact />
+          <h2 className="text-center text-xl font-bold text-gray-900">
             Registrasi Tim ISWMP
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            {PROJECT.name} — isi data diri dan penugasan Anda
+          <p className="mt-1 text-center text-sm text-gray-600">
+            Isi data diri dan penugasan Anda
           </p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        <form className="mt-4 space-y-6" onSubmit={handleSubmit}>
           <div className="bg-white shadow-lg rounded-lg p-6 space-y-4">
             {/* Error Display */}
             {error && (

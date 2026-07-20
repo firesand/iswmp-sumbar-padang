@@ -4,6 +4,8 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 import ClearCacheButton from '../Common/ClearCacheButton';
+import ProjectBrandHeader from '../Common/ProjectBrandHeader';
+import { PROJECT } from '../../config/projectConfig';
 
 function Login() {
   const navigate = useNavigate();
@@ -105,17 +107,7 @@ function Login() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-8">
-        {/* Logo/Header */}
-        <div className="text-center mb-8">
-          <div className="mb-4 flex justify-center">
-            {/* Try multiple logo sources */}
-            <div className="w-24 h-24 bg-gradient-to-br from-green-500 to-green-700 rounded-lg flex items-center justify-center shadow-lg">
-              <span className="text-white text-4xl font-bold">SA</span>
-            </div>
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Surya Abadi</h1>
-          <p className="text-gray-600">HR Management System</p>
-        </div>
+        <ProjectBrandHeader />
 
         {/* Error Alert */}
         {error && (
@@ -138,7 +130,7 @@ function Login() {
               onChange={handleChange}
               required
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              placeholder="nama@perusahaan.com"
+              placeholder={`nama@${PROJECT.shortName.toLowerCase().replace(/\s+/g, '')}.id`}
               disabled={loading}
             />
           </div>
@@ -210,9 +202,9 @@ function Login() {
             Aplikasi error / kamera bermasalah / tampilan lama? Tekan tombol di atas.
           </p>
           <p className="text-xs text-gray-400">
-            Developed by{' '}
+            {PROJECT.ministry} · Developed by{' '}
             <span className="font-medium text-gray-600">
-              Hikmahtiar Studio (2026)
+              {PROJECT.developer} ({PROJECT.year})
             </span>
           </p>
         </div>
