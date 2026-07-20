@@ -1,5 +1,7 @@
 // src/services/emailService.js
 import emailjs from '@emailjs/browser';
+import { PROJECT, getAppUrl, getAdminUrl } from '../config/projectConfig';
+import { ADMIN_CONFIG } from '../config/adminConfig';
 
 // ============================================
 // EMAILJS CONFIGURATION
@@ -25,13 +27,13 @@ export const sendApprovalEmail = async (userData, status = 'approved') => {
   const templateParams = {
     to_name: userData.name,
     to_email: userData.email,
-    from_name: 'HR Surya Abadi',
+    from_name: ADMIN_CONFIG.email.fromName,
     status: status === 'approved' ? 'DISETUJUI' : 'DITOLAK',
     user_email: userData.email,
-    login_url: 'https://surya-abadi-connecteam.vercel.app',
+    login_url: getAppUrl(),
     message: status === 'approved'
-      ? `Selamat! Registrasi Anda telah disetujui. Anda sekarang dapat login menggunakan email dan password yang telah didaftarkan.`
-      : `Mohon maaf, registrasi Anda belum dapat disetujui. Silakan hubungi HR untuk informasi lebih lanjut.`,
+      ? `Selamat! Registrasi Anda di ${PROJECT.shortName} telah disetujui. Anda sekarang dapat login menggunakan email dan password yang telah didaftarkan.`
+      : `Mohon maaf, registrasi Anda belum dapat disetujui. Silakan hubungi admin ${PROJECT.shortName} untuk informasi lebih lanjut.`,
     approved: status === 'approved'
   };
 
@@ -81,8 +83,8 @@ export const sendDailyReminder = async (employeeEmail, employeeName) => {
     to_name: employeeName,
     date: new Date().toLocaleDateString('id-ID'),
     office_hours: '08:00 - 17:00',
-    login_url: 'https://surya-abadi-connecteam.vercel.app',
-    message: `Pengingat: Jangan lupa untuk melakukan check-in hari ini. Office hours: 08:00 - 17:00.`
+    login_url: getAppUrl(),
+    message: `Pengingat: Jangan lupa untuk melakukan check-in hari ini di ${PROJECT.shortName}. Office hours: 08:00 - 17:00.`
   };
 
   try {
@@ -110,7 +112,7 @@ export const sendMonthlyReport = async (recipientEmail, reportData) => {
     avg_attendance: reportData.avgAttendance,
     total_late: reportData.totalLate,
     perfect_attendance_count: reportData.perfectAttendance?.length || 0,
-    dashboard_url: 'https://surya-abadi-connecteam.vercel.app/admin',
+    dashboard_url: getAdminUrl(),
     message: `Laporan attendance bulanan ${reportData.month} ${reportData.year} telah tersedia.`
   };
 
@@ -177,28 +179,28 @@ export const sendEmailSimple = (email, subject, body) => {
 
 // Generate approval email with mailto
 export const generateApprovalMailto = (userData, status = 'approved') => {
-  const subject = `Registrasi ${status === 'approved' ? 'Disetujui' : 'Ditolak'} - Surya Abadi`;
+  const subject = `Registrasi ${status === 'approved' ? 'Disetujui' : 'Ditolak'} — ${PROJECT.shortName}`;
 
   const body = status === 'approved'
     ? `Halo ${userData.name},
 
-Selamat! Registrasi Anda telah DISETUJUI.
+Selamat! Registrasi Anda di ${PROJECT.name} telah DISETUJUI.
 
 Anda sekarang dapat login menggunakan:
 Email: ${userData.email}
 Password: (yang telah Anda daftarkan)
 
-Login di: https://surya-abadi-connecteam.vercel.app
+Login di: ${getAppUrl()}
 
 Terima kasih,
-HR Surya Abadi`
+${ADMIN_CONFIG.email.fromName}`
     : `Halo ${userData.name},
 
 Mohon maaf, registrasi Anda belum dapat disetujui.
-Silakan hubungi HR untuk informasi lebih lanjut.
+Silakan hubungi admin ${PROJECT.shortName} untuk informasi lebih lanjut.
 
 Terima kasih,
-HR Surya Abadi`;
+${ADMIN_CONFIG.email.fromName}`;
 
   sendEmailSimple(userData.email, subject, body);
 };
@@ -256,24 +258,24 @@ export const sendBulkEmails = async (recipients, subject, messageTemplate) => {
 
 export const emailTemplates = {
   approval: {
-    subject: 'Registrasi Disetujui - Surya Abadi',
-    body: `Selamat! Registrasi Anda telah disetujui. Login sekarang di: https://surya-abadi-connecteam.vercel.app`
+    subject: `Registrasi Disetujui — ${PROJECT.shortName}`,
+    body: `Selamat! Registrasi Anda telah disetujui. Login sekarang di: ${getAppUrl()}`
   },
   rejection: {
-    subject: 'Registrasi Ditolak - Surya Abadi',
-    body: `Mohon maaf, registrasi Anda belum dapat disetujui. Silakan hubungi HR untuk informasi lebih lanjut.`
+    subject: `Registrasi Ditolak — ${PROJECT.shortName}`,
+    body: `Mohon maaf, registrasi Anda belum dapat disetujui. Silakan hubungi admin untuk informasi lebih lanjut.`
   },
   reminder: {
-    subject: 'Reminder: Check-in Hari Ini',
-    body: `Jangan lupa untuk melakukan check-in hari ini. Office hours: 08:00 - 17:00`
+    subject: `Reminder: Check-in Hari Ini — ${PROJECT.shortName}`,
+    body: `Jangan lupa untuk melakukan check-in hari ini. Office hours: 08:00 - 17:00. Login: ${getAppUrl()}`
   },
   late: {
-    subject: 'Alert: Late Check-in',
-    body: `Ada karyawan yang terlambat check-in. Silakan cek dashboard untuk detail.`
+    subject: `Alert: Late Check-in — ${PROJECT.shortName}`,
+    body: `Ada karyawan yang terlambat check-in. Silakan cek dashboard untuk detail: ${getAdminUrl()}`
   },
   monthlyReport: {
-    subject: 'Laporan Bulanan Attendance',
-    body: `Laporan attendance bulanan telah tersedia. Silakan cek dashboard admin.`
+    subject: `Laporan Bulanan Attendance — ${PROJECT.shortName}`,
+    body: `Laporan attendance bulanan telah tersedia. Silakan cek dashboard admin: ${getAdminUrl()}`
   }
 };
 
