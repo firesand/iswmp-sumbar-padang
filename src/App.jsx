@@ -27,6 +27,7 @@ import LeaveManagement from './components/Admin/LeaveManagement';
 import PayrollManagement from './components/Admin/PayrollManagement';
 import Footer from './components/Common/Footer';
 import AppUpdateNotification from './components/Common/AppUpdateNotification';
+import CacheClearedToast from './components/Common/CacheClearedToast';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -218,6 +219,7 @@ function App() {
             userId={user?.uid} 
             userRole={userData?.role} 
           />
+          <CacheClearedToast />
           
           <Routes>
             {/* Auth Routes */}

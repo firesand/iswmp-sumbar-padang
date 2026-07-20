@@ -24,20 +24,28 @@ Koleksi **tidak digunakan** (vs parent): `payrollRequests`, `leaveRequests`, `lo
 ```javascript
 {
   id: "kel-001",                    // Document ID
-  nama: "Nama Kelurahan",           // ⏳ to be filled
-  kecamatan: "Nama Kecamatan",      // ⏳ to be filled
+  nama: "Nama Kelurahan",
+  kecamatan: "Nama Kecamatan",
+  alamat: "Alamat kantor kelurahan",
   kota: "Padang",
   provinsi: "Sumatera Barat",
-  lat: null,                        // ⏳ GPS latitude
-  lng: null,                        // ⏳ GPS longitude
+  lat: -0.9,                        // marker kantor kelurahan
+  lng: 100.3,
   radius: 300,                      // meter, default 300 — kalibrasi lapangan
-  isActive: true,
+  coordinateStatus: "provisional", // provisional | verified
+  coordinateSource: "Google Maps POI",
+  coordinateSourceUrl: "https://www.google.com/maps?q=...",
+  verifiedAt: null,
+  catatan: "Verifikasi lapangan sebelum aktivasi geofence",
+  isActive: false,                  // true hanya setelah verifikasi lapangan
   createdAt: Timestamp,
   updatedAt: Timestamp
 }
 ```
 
 **Jumlah record:** 11
+
+Koordinat provisional tetap disimpan agar development dan seed bisa berjalan, tetapi runtime tidak menerapkan radius selama `isActive !== true`. Nama dan koordinat canonical berada di `src/data/seedData.js`.
 
 ---
 

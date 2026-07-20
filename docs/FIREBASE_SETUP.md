@@ -103,6 +103,8 @@ npm run firebase:deploy:rules
 
 ### Seed 11 Kelurahan + Kantor
 
+Seed kelurahan sudah memuat alamat dan marker kantor kelurahan dari Google Maps dengan status `coordinateStatus: provisional`. Script memaksa seluruh geofence kelurahan tetap `isActive: false`; menjalankan seed **tidak** mengaktifkan validasi radius.
+
 **Opsi A — Firebase Admin SDK (disarankan)**
 
 1. Di Console → **Project settings** → **Service accounts**
@@ -186,5 +188,5 @@ Karena registrasi self-register menghasilkan akun `pending`, admin pertama dibua
 3. ⬜ Deploy rules + seed data
 4. ⬜ Buat admin pertama
 5. ⬜ Uji registrasi TA lapangan (pilih kelurahan)
-6. ⬜ Uji check-in mode transisi (tanpa koordinat)
-7. ⬜ Isi koordinat kelurahan → set `isActive: true` → validasi GPS aktif
+6. ⬜ Uji check-in mode transisi (koordinat provisional, geofence belum aktif)
+7. ⬜ Verifikasi titik di kantor kelurahan → set `coordinateStatus: verified`, isi `verifiedAt`, lalu set `isActive: true`

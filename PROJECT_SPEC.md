@@ -179,8 +179,8 @@ Koordinat 11 kelurahan disimpan di Firestore (`kelurahan` collection), bukan env
 
 | Item | Status |
 |------|--------|
-| Daftar 11 kelurahan (nama + kecamatan) | ⏳ Menunggu input |
-| Koordinat GPS per kelurahan | ⏳ Menunggu survey |
+| Daftar 11 kelurahan (nama + kecamatan) | ✅ Dikonfirmasi — 11 kelurahan, 5 kecamatan |
+| Koordinat GPS per kelurahan | 🟡 Marker kantor Google Maps tersedia; menunggu verifikasi lapangan |
 | Koordinat kantor kota Padang | ⏳ **Belum ditentukan** |
 | Radius geofence per lokasi | ⏳ Perlu kalibrasi lapangan |
 | Jam absensi resmi proyek | ⏳ Menunggu konfirmasi |

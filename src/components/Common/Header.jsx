@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { logoutUser } from '../../services/auth';
 import { PROJECT, FEATURES } from '../../config/projectConfig';
+import ClearCacheButton from './ClearCacheButton';
 
 const Header = ({ user, userData }) => {
   const navigate = useNavigate();
@@ -142,6 +143,7 @@ const Header = ({ user, userData }) => {
                 >
                   Profile Settings
                 </button>
+                <ClearCacheButton variant="menu" />
                 <button
                   onClick={() => {
                     handleLogout();
@@ -245,6 +247,10 @@ const Header = ({ user, userData }) => {
                   >
                     Profile Settings
                   </button>
+                  <ClearCacheButton
+                    variant="menu"
+                    className="px-3 py-2 hover:text-blue-600 hover:bg-gray-50 rounded-md"
+                  />
                   <button
                     onClick={() => {
                       handleLogout();

@@ -137,7 +137,14 @@ Super Admin
 
 ---
 
-## 6. Checklist Data User (saat onboarding)
+## 6. Daftar nama personil
+
+Referensi nama & kontak tahun 2026: **[PERSONIL.md](./PERSONIL.md)**  
+(PPM = `TA_PERSAMP`, PPL = `TA_KELEMBAGAAN`. Email & kelurahan penugasan masih TBD.)
+
+---
+
+## 7. Checklist Data User (saat onboarding)
 
 Untuk setiap user yang didaftarkan:
 

@@ -13,6 +13,11 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import {
+  KELURAHAN_SEED,
+  KANTOR_SEED,
+  PROJECT_CONFIG_SEED,
+} from '../src/data/seedData.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -41,35 +46,28 @@ initializeApp({
 const db = getFirestore();
 const now = FieldValue.serverTimestamp();
 
-const KELURAHAN = [
-  { id: 'kel-alang-laweh', nama: 'Alang Laweh', kecamatan: 'Padang Selatan' },
-  { id: 'kel-rawang', nama: 'Rawang', kecamatan: 'Padang Selatan' },
-  { id: 'kel-lubuk-begalung', nama: 'Lubuk Begalung', kecamatan: 'Padang Timur' },
-  { id: 'kel-tanjung-aur', nama: 'Tanjung Aur', kecamatan: 'Lubuk Begalung' },
-  { id: 'kel-surau-gadang', nama: 'Surau Gadang', kecamatan: 'Nanggalo' },
-  { id: 'kel-lubuk-buaya', nama: 'Lubuk Buaya', kecamatan: 'Koto Tangah' },
-  { id: 'kel-parupuak-tabing', nama: 'Parupuak Tabing', kecamatan: 'Koto Tangah' },
-  { id: 'kel-rimbo-kaluang', nama: 'Rimbo Kaluang', kecamatan: 'Padang Barat' },
-  { id: 'kel-berok-nipah', nama: 'Berok Nipah', kecamatan: 'Padang Barat' },
-  { id: 'kel-batang-arau', nama: 'Batang Arau', kecamatan: 'Padang Selatan' },
-  { id: 'kel-kampung-pondok', nama: 'Kampung Pondok', kecamatan: 'Padang Barat' },
-];
-
 async function seed() {
   console.log('🌱 Seeding ISWMP SumBar-Padang Firestore...\n');
 
   const batch = db.batch();
 
-  for (const kel of KELURAHAN) {
+  for (const kel of KELURAHAN_SEED) {
     const ref = db.collection('kelurahan').doc(kel.id);
     batch.set(ref, {
       nama: kel.nama,
       kecamatan: kel.kecamatan,
-      kota: 'Padang',
-      provinsi: 'Sumatera Barat',
-      lat: null,
-      lng: null,
-      radius: 300,
+      alamat: kel.alamat,
+      kota: kel.kota,
+      provinsi: kel.provinsi,
+      lat: kel.lat,
+      lng: kel.lng,
+      radius: kel.radius,
+      coordinateStatus: kel.coordinateStatus,
+      coordinateSource: kel.coordinateSource,
+      coordinateSourceUrl: kel.coordinateSourceUrl,
+      verifiedAt: kel.verifiedAt,
+      catatan: kel.catatan,
+      // Koordinat web tidak boleh mengaktifkan geofence sebelum verifikasi lapangan.
       isActive: false,
       createdAt: now,
       updatedAt: now,
@@ -77,30 +75,30 @@ async function seed() {
     console.log(`  ✓ kelurahan/${kel.id} — ${kel.nama}`);
   }
 
-  const kantorRef = db.collection('kantor').doc('kantor-padang-kota');
+  const kantorRef = db.collection('kantor').doc(KANTOR_SEED.id);
   batch.set(kantorRef, {
-    nama: 'Kantor ISWMP Kota Padang',
-    alamat: null,
-    kota: 'Padang',
-    provinsi: 'Sumatera Barat',
-    lat: null,
-    lng: null,
-    radius: 200,
+    nama: KANTOR_SEED.nama,
+    alamat: KANTOR_SEED.alamat,
+    kota: KANTOR_SEED.kota,
+    provinsi: KANTOR_SEED.provinsi,
+    lat: KANTOR_SEED.lat,
+    lng: KANTOR_SEED.lng,
+    radius: KANTOR_SEED.radius,
     isActive: false,
-    catatan: 'Koordinat kantor belum ditentukan',
+    catatan: KANTOR_SEED.catatan,
     createdAt: now,
     updatedAt: now,
   }, { merge: true });
   console.log('  ✓ kantor/kantor-padang-kota');
 
-  const configRef = db.collection('projectConfig').doc('default');
+  const configRef = db.collection('projectConfig').doc(PROJECT_CONFIG_SEED.id);
   batch.set(configRef, {
-    namaProyek: 'ISWMP SumBar-Padang',
-    jamCheckInDeadline: '08:00',
-    timezone: 'Asia/Jakarta',
-    geofenceTransitionMode: true,
-    defaultKelurahanRadius: 300,
-    defaultKantorRadius: 200,
+    namaProyek: PROJECT_CONFIG_SEED.namaProyek,
+    jamCheckInDeadline: PROJECT_CONFIG_SEED.jamCheckInDeadline,
+    timezone: PROJECT_CONFIG_SEED.timezone,
+    geofenceTransitionMode: PROJECT_CONFIG_SEED.geofenceTransitionMode,
+    defaultKelurahanRadius: PROJECT_CONFIG_SEED.defaultKelurahanRadius,
+    defaultKantorRadius: PROJECT_CONFIG_SEED.defaultKantorRadius,
     updatedAt: now,
   }, { merge: true });
   console.log('  ✓ projectConfig/default');
@@ -109,7 +107,7 @@ async function seed() {
 
   console.log(`
 ✅ Seed selesai!
-   - ${KELURAHAN.length} kelurahan
+   - ${KELURAHAN_SEED.length} kelurahan
    - 1 kantor
    - 1 projectConfig
 

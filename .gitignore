@@ -4,6 +4,15 @@
 .env.local
 *.env.*
 
+# Firebase service account keys (never commit)
+*firebase-adminsdk*.json
+service-account.json
+serviceAccountKey.json
+
+# Build & Firebase local cache
+dist/
+.firebase/
+
 # Logs and temp files
 *.log
 *.tmp

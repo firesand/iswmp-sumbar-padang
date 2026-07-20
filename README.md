@@ -6,7 +6,8 @@ Sub-project sistem absensi & crosscheck kehadiran tim lapangan, dikembangkan dar
 
 > **Developer:** Hikmahtiar Studio  
 > **Repository:** https://github.com/firesand/iswmp-sumbar-padang  
-> **Status:** Fase 1 — Core adaptation (fork selesai, build OK)  
+> **Status:** Fase 1 — Frontend live di Firebase Hosting  
+> **URL:** https://iswmp-sumbar-padang.web.app  
 > **Provinsi:** Sumatera Barat  
 > **Wilayah kerja:** Kota Padang (11 kelurahan + kantor kota)
 
@@ -26,7 +27,7 @@ Aplikasi ini berfungsi sebagai **alat crosscheck kehadiran** tim proyek ISWMP di
 | Tim Kantor Kota Padang | 4 | Kantor kota *(koordinat belum ditentukan)* |
 | **Total pengguna absensi** | **26** | — |
 
-Detail peran: lihat [docs/ORGANIZATION.md](./docs/ORGANIZATION.md)
+Detail peran: [docs/ORGANIZATION.md](./docs/ORGANIZATION.md) · daftar nama: [docs/PERSONIL.md](./docs/PERSONIL.md)
 
 ---
 
@@ -44,8 +45,9 @@ ISWMP-SumBar-Padang/
 ├── public/                   ← PWA assets
 └── docs/
     ├── ORGANIZATION.md       ← Peran & hierarki pengguna
+    ├── PERSONIL.md           ← Daftar 26 personil 2026 (referensi)
     ├── DATA_MODEL.md         ← Skema database Firestore
-    ├── KELURAHAN.md          ← Daftar 11 kelurahan (to be filled)
+    ├── KELURAHAN.md          ← Master 11 kelurahan + titik kantor provisional
     └── ROADMAP.md            ← Tahapan pengembangan
 ```
 
@@ -57,6 +59,7 @@ ISWMP-SumBar-Padang/
 |---------|-----|
 | [PROJECT_SPEC.md](./PROJECT_SPEC.md) | Spesifikasi lengkap fitur & adaptasi dari parent project |
 | [docs/ORGANIZATION.md](./docs/ORGANIZATION.md) | 22 TA lapangan + 4 tim kantor |
+| [docs/PERSONIL.md](./docs/PERSONIL.md) | Daftar 26 personil 2026 (referensi) |
 | [docs/DATA_MODEL.md](./docs/DATA_MODEL.md) | Koleksi Firestore & field definitions |
 | [docs/KELURAHAN.md](./docs/KELURAHAN.md) | Master data 11 kelurahan |
 | [docs/FIREBASE_SETUP.md](./docs/FIREBASE_SETUP.md) | Panduan setup Firebase + seed |
@@ -66,11 +69,11 @@ ISWMP-SumBar-Padang/
 
 ## Langkah Selanjutnya
 
-1. Lengkapi daftar 11 kelurahan di [docs/KELURAHAN.md](./docs/KELURAHAN.md)
+1. Verifikasi lapangan titik provisional 11 kantor kelurahan di [docs/KELURAHAN.md](./docs/KELURAHAN.md)
 2. Tentukan koordinat kantor kota Padang (4 orang tim kantor)
-3. ~~Fork/adaptasi codebase dari `surya-abadi-connecteam/`~~ ✅ Selesai
-4. Setup Firebase project terpisah untuk ISWMP SumBar-Padang
-5. Implementasi multi-geofence + adaptasi model user (Fase 1 lanjutan)
+3. Jalankan seed Firestore setelah menyiapkan service account
+4. Uji registrasi TA dan check-in dalam mode transisi
+5. Kalibrasi radius sebelum mengaktifkan geofence per kelurahan
 
 ## Development
 

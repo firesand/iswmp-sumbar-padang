@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
+import ClearCacheButton from '../Common/ClearCacheButton';
 
 function Login() {
   const navigate = useNavigate();
@@ -203,11 +204,15 @@ function Login() {
         </div>
 
         {/* Developer Attribution */}
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center space-y-3">
+          <ClearCacheButton variant="button" label="Perbarui Aplikasi (Hapus Cache)" />
+          <p className="text-xs text-gray-500 px-2">
+            Aplikasi error / kamera bermasalah / tampilan lama? Tekan tombol di atas.
+          </p>
           <p className="text-xs text-gray-400">
             Developed by{' '}
             <span className="font-medium text-gray-600">
-              Hikmahtiar Studio (2025)
+              Hikmahtiar Studio (2026)
             </span>
           </p>
         </div>

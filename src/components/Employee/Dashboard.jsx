@@ -20,12 +20,16 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 import { validateLocationForUser } from '../../services/geofenceService';
 import { PROJECT } from '../../config/projectConfig';
+import ClearCacheButton from '../Common/ClearCacheButton';
+import { compressAttendancePhoto } from '../../utils/compressAttendancePhoto';
 
 function EmployeeDashboard() {
   const navigate = useNavigate();
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,6 +42,9 @@ function EmployeeDashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraMode, setCameraMode] = useState('idle'); // idle | preview | native | failed
+  const [cameraHint, setCameraHint] = useState('');
 
   // Utility function untuk deteksi browser dan device
   const detectDevice = () => {
@@ -183,152 +190,220 @@ function EmployeeDashboard() {
     return true;
   };
 
-  // Initialize camera with enhanced mobile support
+  const stopMediaStream = (stream) => {
+    if (!stream) return;
+    stream.getTracks().forEach((track) => track.stop());
+  };
+
+  /** Progressive getUserMedia — desktop / fallback only. */
+  const requestCameraStream = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const err = new Error('Camera API not supported');
+      err.name = 'NotSupportedError';
+      throw err;
+    }
+
+    // Prefer explicit deviceId on multi-camera phones (foldables)
+    let deviceAttempts = [];
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videos = devices.filter((d) => d.kind === 'videoinput' && d.deviceId);
+      const frontish = videos.filter((d) => /front|user|selfie|facing/i.test(d.label));
+      const ordered = [...frontish, ...videos.filter((d) => !frontish.includes(d))];
+      deviceAttempts = ordered.slice(0, 3).map((d) => ({
+        video: { deviceId: { exact: d.deviceId } },
+        audio: false,
+      }));
+    } catch {
+      // ignore enumerate failures
+    }
+
+    const attempts = [
+      ...deviceAttempts,
+      { video: { facingMode: 'user' }, audio: false },
+      { video: { facingMode: { ideal: 'user' } }, audio: false },
+      { video: true, audio: false },
+    ];
+
+    let lastError;
+    for (const constraints of attempts) {
+      try {
+        console.log('Trying camera constraints:', constraints);
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        console.warn('Camera constraint failed:', constraints, error?.name, error?.message);
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('Unable to access camera');
+  };
+
+  const waitForVideoElement = async (timeoutMs = 3000) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (videoRef.current) return videoRef.current;
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    throw new Error('Video element not ready');
+  };
+
+  const attachStreamToVideo = async (stream) => {
+    const video = await waitForVideoElement();
+    video.srcObject = stream;
+    video.muted = true;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Video load timeout')), 8000);
+
+      const onReady = () => {
+        clearTimeout(timeout);
+        video.play().then(resolve).catch(reject);
+      };
+
+      if (video.readyState >= 1) {
+        onReady();
+      } else {
+        video.onloadedmetadata = onReady;
+      }
+
+      video.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error('Video error'));
+      };
+    });
+  };
+
+  const openNativeCamera = () => {
+    setCameraMode('native');
+    setCameraHint('Membuka kamera HP…');
+    // Must run from a direct tap so Android allows the file picker
+    fileInputRef.current?.click();
+  };
+
+  const startInAppPreview = async () => {
+    setCameraStarting(true);
+    setCameraMode('preview');
+    setCameraHint('Menyiapkan preview kamera…');
+    let stream = null;
+    try {
+      stream = await requestCameraStream();
+      streamRef.current = stream;
+      await attachStreamToVideo(stream);
+      setCameraHint('');
+      setCameraMode('preview');
+    } catch (error) {
+      console.error('In-app camera preview failed:', error);
+      stopMediaStream(stream);
+      streamRef.current = null;
+      setCameraMode('failed');
+      setCameraHint(
+        'Preview di aplikasi tidak tersedia di HP ini. Gunakan tombol "Buka Kamera HP" di bawah.'
+      );
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  // Check In/Out: validate location, then show capture UI.
+  // On Android/iOS prefer native camera (reliable on foldables / Android 16).
   const startCamera = async (type) => {
     setCheckType(type);
-    setShowCamera(false);
+    setLocationError('');
+    setCameraStarting(true);
+    setCameraMode('idle');
+    setCameraHint('');
 
     const device = detectDevice();
     console.log('Starting camera for device:', device);
 
-    // First validate location
     const isLocationValid = await validateLocation();
     if (!isLocationValid) {
+      setCameraStarting(false);
       return;
     }
 
-    try {
-      // Check if mediaDevices is available
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera API not supported');
-      }
+    setShowCamera(true);
+    setCameraStarting(false);
 
-      // Different constraints for different devices
-      let constraints;
-
-      if (device.isIOS) {
-        // iOS specific constraints
-        constraints = {
-          video: {
-            facingMode: 'user'
-          },
-          audio: false
-        };
-      } else if (device.isAndroid) {
-        // Android specific constraints
-        constraints = {
-          video: {
-            facingMode: { ideal: 'user' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        };
-      } else {
-        // Desktop/other
-        constraints = {
-          video: {
-            width: { min: 640, ideal: 1280, max: 1920 },
-            height: { min: 480, ideal: 720, max: 1080 },
-            facingMode: 'user'
-          },
-          audio: false
-        };
-      }
-
-      console.log('Using constraints:', constraints);
-
-      // Try to get camera stream with fallback
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (e) {
-        console.log('Failed with ideal constraints, trying basic...');
-        // Fallback to basic constraints
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false
-        });
-      }
-
-      if (!videoRef.current) {
-        throw new Error('Video element not ready');
-      }
-
-      // Set stream to video element
-      videoRef.current.srcObject = stream;
-
-      // Wait for video to be ready
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Video load timeout'));
-        }, 5000);
-
-        videoRef.current.onloadedmetadata = () => {
-          clearTimeout(timeout);
-          videoRef.current.play()
-          .then(() => {
-            console.log('Video playing successfully');
-            setShowCamera(true);
-            resolve();
-          })
-          .catch(reject);
-        };
-
-        videoRef.current.onerror = (e) => {
-          clearTimeout(timeout);
-          reject(new Error('Video error: ' + e.message));
-        };
-      });
-
-    } catch (error) {
-      console.error('Camera error:', error);
-      handleCameraError(error, type);
+    if (device.isMobile) {
+      // Don't auto-call getUserMedia — often fails on Android 16 / multi-camera.
+      // Show clear CTA that opens system camera (user gesture).
+      setCameraMode('native');
+      setCameraHint('Tekan tombol hijau untuk membuka kamera HP dan ambil selfie.');
+      return;
     }
+
+    await startInAppPreview();
   };
 
-  // Better error handling for camera
-  const handleCameraError = (error, type) => {
-    let message = 'Tidak dapat mengakses kamera.';
+  const uploadAttendancePhoto = async (blobOrFile) => {
+    const compressed = await compressAttendancePhoto(blobOrFile);
+    const timestamp = Date.now();
+    const fileName = `${auth.currentUser.uid}_${checkType || 'in'}_${timestamp}.jpg`;
+    const storageRef = ref(storage, `attendances/${auth.currentUser.uid}/${fileName}`);
+    const uploadSnapshot = await uploadBytes(storageRef, compressed, {
+      contentType: 'image/jpeg',
+      customMetadata: {
+        originalBytes: String(blobOrFile.size || 0),
+        compressedBytes: String(compressed.size || 0),
+      },
+    });
+    return getDownloadURL(uploadSnapshot.ref);
+  };
 
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      message = 'Akses kamera ditolak. Silakan izinkan akses kamera di pengaturan browser/aplikasi.';
-    } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-      message = 'Kamera tidak ditemukan pada perangkat ini.';
-    } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-      message = 'Kamera sedang digunakan aplikasi lain. Tutup aplikasi lain dan coba lagi.';
-    } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
-      message = 'Kamera tidak mendukung pengaturan yang diminta.';
-    } else if (error.message.includes('https')) {
-      message = 'Kamera hanya dapat diakses melalui koneksi aman (HTTPS).';
+  const handleNativePhotoSelected = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      setCameraHint('Foto belum dipilih. Tekan "Buka Kamera HP" untuk coba lagi.');
+      return;
     }
 
-    alert(message + '\n\nAnda dapat melanjutkan check-in tanpa foto.');
-
-    // Offer to continue without photo
-    const confirmWithoutPhoto = window.confirm(
-      'Lanjutkan check-in tanpa foto?'
-    );
-
-    if (confirmWithoutPhoto) {
-      setIsProcessing(true);
-      if (type === 'in') {
-        processCheckIn('').finally(() => setIsProcessing(false));
+    setIsProcessing(true);
+    setCameraHint('Mengompres & mengunggah foto…');
+    try {
+      const photoUrl = await uploadAttendancePhoto(file);
+      setShowCamera(false);
+      if (checkType === 'out') {
+        await processCheckOut(photoUrl);
       } else {
-        processCheckOut('').finally(() => setIsProcessing(false));
+        await processCheckIn(photoUrl);
       }
+    } catch (error) {
+      console.error('Native photo upload error:', error);
+      const continueWithout = window.confirm(
+        'Gagal upload foto. Lanjutkan tanpa foto?'
+      );
+      if (continueWithout) {
+        setShowCamera(false);
+        if (checkType === 'out') {
+          await processCheckOut('');
+        } else {
+          await processCheckIn('');
+        }
+      }
+    } finally {
+      setIsProcessing(false);
+      setCameraHint('');
     }
   };
 
   // Stop camera
   const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
+    if (videoRef.current?.srcObject) {
+      stopMediaStream(videoRef.current.srcObject);
+      videoRef.current.srcObject = null;
     }
+    stopMediaStream(streamRef.current);
+    streamRef.current = null;
     setShowCamera(false);
     setCheckType('');
     setLocationError('');
+    setCameraStarting(false);
+    setCameraMode('idle');
+    setCameraHint('');
   };
 
   // Enhanced capture photo with better error handling
@@ -355,53 +430,41 @@ function EmployeeDashboard() {
         }
       }
 
-      const context = canvas.getContext('2d');
+      const context = canvas.getContext('2d', { alpha: false });
 
-      // Set canvas dimensions sesuai video
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
+      // Resize down before encode — uploadAttendancePhoto will compress further
+      const maxSide = 960;
+      const srcW = video.videoWidth || 640;
+      const srcH = video.videoHeight || 480;
+      const scale = Math.min(maxSide / srcW, maxSide / srcH, 1);
+      canvas.width = Math.round(srcW * scale);
+      canvas.height = Math.round(srcH * scale);
 
       console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
-
-      // Draw video frame to canvas (with mirror effect removed for actual capture)
-      context.save();
-      // If you want to keep the mirror effect in the captured image, uncomment the next two lines:
-      // context.scale(-1, 1);
-      // context.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-      // Otherwise, use normal drawing:
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      context.restore();
 
-      // Convert canvas to blob dengan fallback
-      let blob;
-
-      // Method 1: Modern browsers
-      if (canvas.toBlob) {
-        blob = await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Blob creation timeout'));
-          }, 5000);
-
-          canvas.toBlob(
-            (blobResult) => {
-              clearTimeout(timeout);
-              if (blobResult) {
-                resolve(blobResult);
-              } else {
-                reject(new Error('Failed to create blob'));
-              }
-            },
-            'image/jpeg',
-            0.8
-          );
-        });
-      }
-      // Method 2: Fallback untuk browser lama
-      else {
-        const dataURL = canvas.toDataURL('image/jpeg', 0.8);
-        const response = await fetch(dataURL);
-        blob = await response.blob();
-      }
+      const blob = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Blob creation timeout')), 5000);
+        if (!canvas.toBlob) {
+          try {
+            const dataURL = canvas.toDataURL('image/jpeg', 0.58);
+            fetch(dataURL).then((r) => r.blob()).then(resolve).catch(reject);
+          } catch (e) {
+            clearTimeout(timeout);
+            reject(e);
+          }
+          return;
+        }
+        canvas.toBlob(
+          (blobResult) => {
+            clearTimeout(timeout);
+            if (blobResult) resolve(blobResult);
+            else reject(new Error('Failed to create blob'));
+          },
+          'image/jpeg',
+          0.58
+        );
+      });
 
       if (!blob) {
         throw new Error('Failed to create image blob');
@@ -411,13 +474,8 @@ function EmployeeDashboard() {
 
       // Upload to Firebase Storage dengan error handling
       try {
-        const timestamp = Date.now();
-        const fileName = `${auth.currentUser.uid}_${checkType}_${timestamp}.jpg`;
-        const storageRef = ref(storage, `attendances/${auth.currentUser.uid}/${fileName}`);
-
         console.log('Uploading photo to Firebase...');
-        const uploadSnapshot = await uploadBytes(storageRef, blob);
-        const photoUrl = await getDownloadURL(uploadSnapshot.ref);
+        const photoUrl = await uploadAttendancePhoto(blob);
         console.log('Photo uploaded successfully:', photoUrl);
 
         // Process check-in or check-out
@@ -722,15 +780,28 @@ function EmployeeDashboard() {
     )}
     </div>
 
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/*"
+      capture="user"
+      className="hidden"
+      onChange={handleNativePhotoSelected}
+    />
+
     {/* Camera Modal */}
     {showCamera && (
       <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl max-w-lg w-full p-6">
-      <h3 className="text-lg font-semibold mb-4">
-      Take a Selfie for Check {checkType === 'in' ? 'In' : 'Out'}
+      <h3 className="text-lg font-semibold mb-2">
+      Selfie Check {checkType === 'in' ? 'In' : 'Out'}
       </h3>
+      <p className="text-sm text-gray-600 mb-4">
+      {cameraHint || 'Ambil foto wajah untuk verifikasi kehadiran.'}
+      </p>
 
-      <div className="relative bg-black rounded-lg overflow-hidden mb-4">
+      {cameraMode === 'preview' && (
+      <div className="relative bg-black rounded-lg overflow-hidden mb-4 min-h-[200px]">
       <video
       ref={videoRef}
       autoPlay
@@ -741,7 +812,7 @@ function EmployeeDashboard() {
       style={{
         maxWidth: '100%',
         height: 'auto',
-        transform: 'scaleX(-1)' // Mirror effect untuk selfie
+        transform: 'scaleX(-1)'
       }}
       />
       <canvas
@@ -750,6 +821,23 @@ function EmployeeDashboard() {
       style={{ display: 'none' }}
       />
       </div>
+      )}
+
+      {cameraMode !== 'preview' && (
+        <div className="mb-4 rounded-lg bg-green-50 border border-green-100 p-4 text-center">
+          <p className="text-sm text-green-900 font-medium">
+            Gunakan kamera HP (lebih stabil di Android)
+          </p>
+        </div>
+      )}
+
+      {/* Keep refs mounted for capture helpers */}
+      {cameraMode !== 'preview' && (
+        <>
+          <video ref={videoRef} className="hidden" playsInline muted autoPlay />
+          <canvas ref={canvasRef} className="hidden" />
+        </>
+      )}
 
       {location && (
         <div className="mb-4 p-3 bg-green-50 rounded-lg">
@@ -759,38 +847,57 @@ function EmployeeDashboard() {
         </div>
       )}
 
-      <div className="flex gap-3">
-      <button
-      onClick={capturePhoto}
-      disabled={isProcessing}
-      className="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-      >
-      {isProcessing ? (
-        <>
-        <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white mr-2"></div>
-        Processing...
-        </>
+      <div className="flex flex-col gap-3">
+      {cameraMode === 'preview' ? (
+        <button
+        onClick={capturePhoto}
+        disabled={isProcessing || cameraStarting}
+        className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+        >
+        {isProcessing ? 'Memproses…' : 'Ambil Foto'}
+        </button>
       ) : (
-        <>
-        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-        Ambil Foto
-        </>
+        <button
+        type="button"
+        onClick={openNativeCamera}
+        disabled={isProcessing}
+        className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center justify-center"
+        >
+        {isProcessing ? 'Mengunggah…' : 'Buka Kamera HP'}
+        </button>
       )}
-      </button>
+
+      <div className="flex gap-3">
+      {cameraMode !== 'preview' && (
+        <button
+        type="button"
+        onClick={startInAppPreview}
+        disabled={isProcessing || cameraStarting}
+        className="flex-1 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium disabled:opacity-50"
+        >
+        Coba preview
+        </button>
+      )}
       <button
       onClick={stopCamera}
       disabled={isProcessing}
-      className="px-6 py-3 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition-colors disabled:opacity-50"
+      className="flex-1 px-6 py-3 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition-colors disabled:opacity-50"
       >
       Batal
       </button>
       </div>
+      </div>
 
-      {/* Tambah tombol alternatif untuk mobile */}
-      <div className="mt-3 text-center">
+      <div className="mt-3 text-center space-y-2">
+      {cameraMode === 'preview' && (
+      <button
+      type="button"
+      onClick={openNativeCamera}
+      className="text-sm text-green-700 underline"
+      >
+      Atau buka kamera/galeri sistem
+      </button>
+      )}
       <button
       onClick={() => {
         stopCamera();
@@ -806,7 +913,7 @@ function EmployeeDashboard() {
           }
         }
       }}
-      className="text-sm text-gray-500 underline"
+      className="block w-full text-sm text-gray-500 underline"
       >
       Skip foto (lanjut tanpa foto)
       </button>
@@ -870,6 +977,13 @@ function EmployeeDashboard() {
     </tbody>
     </table>
     </div>
+    </div>
+
+    <div className="mt-6 rounded-xl bg-white shadow-sm p-4 text-center">
+      <p className="text-sm text-gray-600 mb-3">
+        Aplikasi error, kamera bermasalah, atau tampilan tidak update?
+      </p>
+      <ClearCacheButton variant="button" label="Perbarui Aplikasi (Hapus Cache)" />
     </div>
     </div>
     </div>

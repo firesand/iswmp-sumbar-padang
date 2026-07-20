@@ -16,6 +16,7 @@
     "firebase": "firebase",
     "firebase:login": "firebase login",
     "firebase:deploy:rules": "firebase deploy --only firestore:rules,storage,firestore:indexes",
+    "firebase:deploy:hosting": "npm run build && firebase deploy --only hosting",
     "clean:cache": "npm cache clean --force && rm -rf node_modules/.vite"
   },
   "dependencies": {
