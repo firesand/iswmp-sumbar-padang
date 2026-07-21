@@ -19,6 +19,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 
 import { validateLocationForUser } from '../../services/geofenceService';
+import { isValidGpsCoords } from '../../utils/geolocation';
 import { PROJECT } from '../../config/projectConfig';
 import ClearCacheButton from '../Common/ClearCacheButton';
 import { compressAttendancePhoto } from '../../utils/compressAttendancePhoto';
@@ -574,6 +575,22 @@ function EmployeeDashboard() {
   // Process check-in with null photo support
   const processCheckIn = async (photoUrl) => {
     try {
+      // GPS wajib diulang sebelum write — state lama / DevTools tidak cukup
+      const freshValidation = await validateLocationForUser(userData);
+      if (!freshValidation.isValid || !isValidGpsCoords(freshValidation.location)) {
+        const msg = freshValidation.message || 'GPS wajib aktif untuk absensi.';
+        setLocationError(msg);
+        alert(msg);
+        if (isPermissionDeniedMessage(msg, freshValidation.code)) {
+          setPermissionGuideFocus('location');
+          setPermissionGuideOpen(true);
+        }
+        return;
+      }
+
+      setLocation(freshValidation.location);
+      setLocationValidation(freshValidation);
+
       const now = new Date();
       const today = now.toISOString().split('T')[0];
       const isLate = now.getHours() >= 9; // Consider late if after 9 AM
@@ -584,19 +601,25 @@ function EmployeeDashboard() {
         date: today,
         checkIn: serverTimestamp(),
         checkInTime: now.toISOString(),
-        checkInLocation: location,
+        checkInLocation: {
+          lat: freshValidation.location.lat,
+          lng: freshValidation.location.lng,
+          accuracy: freshValidation.location.accuracy ?? null,
+          source: freshValidation.location.source || null,
+          capturedAt: freshValidation.location.capturedAt || Date.now(),
+        },
         checkInPhoto: photoUrl || null,
         status: isLate ? 'late' : 'ontime',
         checkOut: null,
         checkOutLocation: null,
         checkOutPhoto: null,
         workHours: 0,
-        locationSource: locationValidation?.source || location?.source || null,
-        locationAccuracy: locationValidation?.accuracy ?? location?.accuracy ?? null,
-        distanceFromGeofence: locationValidation?.distance ?? null,
-        geofenceId: locationValidation?.geofence?.id || null,
-        geofenceName: locationValidation?.geofence?.nama || null,
-        transitionMode: locationValidation?.transitionMode || false,
+        locationSource: freshValidation.source || freshValidation.location.source || null,
+        locationAccuracy: freshValidation.accuracy ?? freshValidation.location.accuracy ?? null,
+        distanceFromGeofence: freshValidation.distance ?? null,
+        geofenceId: freshValidation.geofence?.id || null,
+        geofenceName: freshValidation.geofence?.nama || null,
+        transitionMode: freshValidation.transitionMode || false,
       };
 
       // Guard: skip if already has attendance today (client-side safeguard)
@@ -624,7 +647,12 @@ function EmployeeDashboard() {
       alert(`Check-in berhasil ${photoStatus}!\nStatus: ${isLate ? 'Terlambat' : 'Tepat Waktu'}`);
     } catch (error) {
       console.error('Error processing check-in:', error);
-      alert('Gagal memproses check-in. Silakan coba lagi.');
+      const denied = error?.code === 'permission-denied' || /permission/i.test(error?.message || '');
+      alert(
+        denied
+          ? 'Absensi ditolak server: GPS/lokasi tidak valid atau tidak memenuhi aturan keamanan.'
+          : 'Gagal memproses check-in. Silakan coba lagi.'
+      );
     }
   };
 
@@ -636,25 +664,44 @@ function EmployeeDashboard() {
         return;
       }
 
+      const freshValidation = await validateLocationForUser(userData);
+      if (!freshValidation.isValid || !isValidGpsCoords(freshValidation.location)) {
+        const msg = freshValidation.message || 'GPS wajib aktif untuk check-out.';
+        setLocationError(msg);
+        alert(msg);
+        return;
+      }
+
+      setLocation(freshValidation.location);
+      setLocationValidation(freshValidation);
+
       const now = new Date();
       const checkInTime = todayAttendance.checkIn.toDate();
       const workHours = (now - checkInTime) / (1000 * 60 * 60); // Hours
 
+      const checkOutLocation = {
+        lat: freshValidation.location.lat,
+        lng: freshValidation.location.lng,
+        accuracy: freshValidation.location.accuracy ?? null,
+        source: freshValidation.location.source || null,
+        capturedAt: freshValidation.location.capturedAt || Date.now(),
+      };
+
       await updateDoc(doc(db, 'attendances', todayAttendance.id), {
         checkOut: serverTimestamp(),
-                      checkOutTime: now.toISOString(),
-                      checkOutLocation: location,
-                      checkOutPhoto: photoUrl || null, // Allow null photo
-                      workHours: parseFloat(workHours.toFixed(2))
+        checkOutTime: now.toISOString(),
+        checkOutLocation,
+        checkOutPhoto: photoUrl || null,
+        workHours: parseFloat(workHours.toFixed(2))
       });
 
       // Update local state
       setTodayAttendance({
         ...todayAttendance,
         checkOut: Timestamp.fromDate(now),
-                         checkOutLocation: location,
-                         checkOutPhoto: photoUrl || null,
-                         workHours: parseFloat(workHours.toFixed(2))
+        checkOutLocation,
+        checkOutPhoto: photoUrl || null,
+        workHours: parseFloat(workHours.toFixed(2))
       });
 
       const photoStatus = photoUrl ? 'dengan foto' : 'tanpa foto';

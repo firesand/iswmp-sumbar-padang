@@ -4,6 +4,7 @@ import { auth } from '../../services/firebase';
 import { addAttendance, getTodayAttendance } from '../../services/database';
 import { uploadAttendancePhoto } from '../../services/storage';
 import { validateLocationForUser, getGeofenceLabel } from '../../services/geofenceService';
+import { isValidGpsCoords } from '../../utils/geolocation';
 import { PROJECT } from '../../config/projectConfig';
 
 const CheckIn = () => {
@@ -173,8 +174,8 @@ const CheckIn = () => {
       // Validate location
       const locationValidation = await validateLocationForUser(userData);
       
-      if (!locationValidation.isValid) {
-        setError(locationValidation.message || `Anda berada ${locationValidation.distance}m dari lokasi penugasan. Maksimal ${locationValidation.maxRadius}m untuk absensi.`);
+      if (!locationValidation.isValid || !isValidGpsCoords(locationValidation.location)) {
+        setError(locationValidation.message || 'GPS wajib aktif untuk absensi.');
         setLoading(false);
         return;
       }
@@ -209,7 +210,13 @@ const CheckIn = () => {
         userName: userData?.name || user.displayName,
         date: new Date().toISOString().split('T')[0],
         checkIn: new Date(),
-        checkInLocation: locationValidation.location,
+        checkInLocation: {
+          lat: locationValidation.location.lat,
+          lng: locationValidation.location.lng,
+          accuracy: locationValidation.location.accuracy ?? null,
+          source: locationValidation.location.source || null,
+          capturedAt: locationValidation.location.capturedAt || Date.now(),
+        },
         checkInPhoto: photoUrl,
         status: isLate ? 'late' : 'ontime',
         geofenceId: locationValidation.geofence?.id || null,

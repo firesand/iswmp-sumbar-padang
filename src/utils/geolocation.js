@@ -2,7 +2,9 @@
 // GPS wajib untuk absensi; tidak ada fallback ke koordinat kantor.
 
 const ACCURACY_THRESHOLD_METERS = 1000;
-const MAX_GPS_ACCURACY_FOR_CHECKIN = 500; // tolak jika akurasi GPS > 500m
+export const MAX_GPS_ACCURACY_FOR_CHECKIN = 500; // tolak jika akurasi GPS > 500m
+
+const BLOCKED_LOCATION_SOURCES = new Set(['fallback', 'denied', 'office', 'manual']);
 
 export class GeolocationRequiredError extends Error {
   constructor(message, code = 'GPS_REQUIRED') {
@@ -10,6 +12,36 @@ export class GeolocationRequiredError extends Error {
     this.name = 'GeolocationRequiredError';
     this.code = code;
   }
+}
+
+/** Validasi struktur koordinat GPS (client + sebelum write Firestore). */
+export function isValidGpsCoords(location) {
+  if (!location || typeof location !== 'object') return false;
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  // Tolak (0,0) — sering dipakai spoof/default
+  if (lat === 0 && lng === 0) return false;
+  if (location.source && BLOCKED_LOCATION_SOURCES.has(location.source)) return false;
+  if (
+    location.accuracy != null &&
+    Number.isFinite(Number(location.accuracy)) &&
+    Number(location.accuracy) > MAX_GPS_ACCURACY_FOR_CHECKIN
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function assertValidGpsForAttendance(location) {
+  if (!isValidGpsCoords(location)) {
+    throw new GeolocationRequiredError(
+      'Lokasi GPS tidak valid. Aktifkan GPS dan izinkan akses lokasi untuk absensi.',
+      'GPS_INVALID'
+    );
+  }
+  return location;
 }
 
 // Get current GPS location — rejects if unavailable (no office fallback)
@@ -28,14 +60,16 @@ export const getCurrentLocation = () => {
         navigator.geolocation.getCurrentPosition(res, rej, options)
       );
 
+    // maximumAge: 0 — selalu minta posisi baru, tolak cache lama
     const highAccOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
-    const lowAccOptions = { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 };
+    const lowAccOptions = { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 };
 
     const toResult = (pos, source) => ({
       lat: pos.coords.latitude,
       lng: pos.coords.longitude,
       accuracy: pos.coords.accuracy,
       source,
+      capturedAt: Date.now(),
     });
 
     const fail = (err) => {
@@ -68,6 +102,10 @@ export const getCurrentLocation = () => {
         const highResult = toResult(first, 'gps-high');
 
         if (Number.isFinite(highResult.accuracy) && highResult.accuracy <= 150) {
+          if (!isValidGpsCoords(highResult)) {
+            fail({ code: 2, message: 'Koordinat GPS tidak valid' });
+            return;
+          }
           resolve(highResult);
           return;
         }
@@ -81,15 +119,28 @@ export const getCurrentLocation = () => {
             lowResult.accuracy < highResult.accuracy
               ? lowResult
               : highResult;
+          if (!isValidGpsCoords(better)) {
+            fail({ code: 2, message: 'Koordinat GPS tidak valid' });
+            return;
+          }
           resolve(better);
         } catch {
+          if (!isValidGpsCoords(highResult)) {
+            fail({ code: 2, message: 'Koordinat GPS tidak valid' });
+            return;
+          }
           resolve(highResult);
         }
       })
       .catch(async (highErr) => {
         try {
           const low = await getPosition(lowAccOptions);
-          resolve(toResult(low, 'gps-low'));
+          const lowResult = toResult(low, 'gps-low');
+          if (!isValidGpsCoords(lowResult)) {
+            fail({ code: 2, message: 'Koordinat GPS tidak valid' });
+            return;
+          }
+          resolve(lowResult);
         } catch (lowErr) {
           fail(lowErr?.code ? lowErr : highErr);
         }
@@ -149,12 +200,13 @@ export const validateLocationAgainstGeofence = async (geofence) => {
     };
   }
 
-  if (currentLocation.source === 'fallback') {
+  if (!isValidGpsCoords(currentLocation) || currentLocation.source === 'fallback') {
     return {
       isValid: false,
       transitionMode: false,
       message: 'Lokasi GPS tidak valid. Aktifkan GPS dan izinkan akses lokasi.',
-      source: 'fallback',
+      source: currentLocation?.source || 'fallback',
+      code: 'GPS_INVALID',
     };
   }
 
@@ -169,6 +221,7 @@ export const validateLocationAgainstGeofence = async (geofence) => {
       location: currentLocation,
       source: currentLocation.source,
       accuracy: currentLocation.accuracy,
+      code: 'GPS_ACCURACY',
     };
   }
 

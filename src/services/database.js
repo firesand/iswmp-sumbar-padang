@@ -12,6 +12,7 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { isValidGpsCoords } from '../utils/geolocation';
 
 // Attendance functions
 export const addAttendance = async (attendanceData) => {
@@ -19,6 +20,13 @@ export const addAttendance = async (attendanceData) => {
     // Guard: ensure only one attendance per user per date
     if (!attendanceData?.userId || !attendanceData?.date) {
       return { success: false, message: 'Missing userId or date' };
+    }
+
+    if (!isValidGpsCoords(attendanceData.checkInLocation)) {
+      return {
+        success: false,
+        message: 'GPS wajib aktif. Lokasi check-in tidak valid — absensi ditolak.',
+      };
     }
 
     const existingQuery = query(

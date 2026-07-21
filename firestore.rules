@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for security checks
     function isSignedIn() {
       return request.auth != null;
     }
@@ -18,18 +17,89 @@ service cloud.firestore {
     function isActiveUser() {
       return isSignedIn() && userDoc().data.accountStatus == 'active';
     }
-    
+
+    // Titik GPS wajib: lat/lng angka valid (bukan null / string / map kosong)
+    function isValidGpsPoint(loc) {
+      return loc is map
+        && loc.keys().hasAll(['lat', 'lng'])
+        && loc.lat is number
+        && loc.lng is number
+        && loc.lat >= -90
+        && loc.lat <= 90
+        && loc.lng >= -180
+        && loc.lng <= 180
+        // Tolak koordinat (0,0) yang sering dipakai spoof/default
+        && !(loc.lat == 0 && loc.lng == 0);
+    }
+
+    function isValidAttendanceCreate() {
+      let d = request.resource.data;
+      return d.userId == request.auth.uid
+        && d.keys().hasAll([
+          'userId', 'date', 'checkIn', 'checkInLocation', 'status'
+        ])
+        && d.keys().hasOnly([
+          'userId', 'userName', 'date',
+          'checkIn', 'checkInTime', 'checkInLocation', 'checkInPhoto',
+          'status',
+          'checkOut', 'checkOutTime', 'checkOutLocation', 'checkOutPhoto', 'workHours',
+          'locationSource', 'locationAccuracy', 'distanceFromGeofence',
+          'geofenceId', 'geofenceName', 'transitionMode',
+          'createdAt',
+          'userRole', 'assignmentType',
+          'kelurahanId', 'kelurahanNama', 'jenisTenagaAhli',
+          'kantorId', 'peranKantor',
+          'assignedLocation', 'distance', 'isWithinRadius', 'notes'
+        ])
+        && d.date is string
+        && d.status is string
+        && isValidGpsPoint(d.checkInLocation)
+        && (
+          !d.checkInLocation.keys().hasAny(['accuracy'])
+          || d.checkInLocation.accuracy == null
+          || (d.checkInLocation.accuracy is number
+              && d.checkInLocation.accuracy >= 0
+              && d.checkInLocation.accuracy <= 500)
+        )
+        // Tolak sumber lokasi fallback / palsu yang diketahui client lama
+        && (
+          !('locationSource' in d)
+          || d.locationSource == null
+          || !(d.locationSource in ['fallback', 'denied', 'office', 'manual'])
+        )
+        && (
+          !('locationAccuracy' in d)
+          || d.locationAccuracy == null
+          || (d.locationAccuracy is number && d.locationAccuracy >= 0 && d.locationAccuracy <= 500)
+        );
+    }
+
+    function isValidAttendanceUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let d = request.resource.data;
+      return request.auth.uid == resource.data.userId
+        && affected.hasOnly([
+          'checkOut', 'checkOutTime', 'checkOutLocation', 'checkOutPhoto',
+          'workHours', 'updatedAt', 'notes'
+        ])
+        && (
+          !affected.hasAny(['checkOutLocation'])
+          || d.checkOutLocation == null
+          || isValidGpsPoint(d.checkOutLocation)
+        );
+    }
+
     // Validate user document structure - prevent sensitive field exposure
     function isValidUserCreate() {
-      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role', 
+      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role',
                           'accountStatus', 'createdAt', 'createdBy',
                           'profileImage', 'position', 'department',
                           'mustChangePassword', 'passwordResetAt', 'passwordResetBy'];
       return request.resource.data.keys().hasOnly(allowedFields);
     }
-    
+
     function isValidUserUpdate() {
-      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role', 
+      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role',
                           'accountStatus', 'profileImage', 'position', 'department',
                           'mustChangePassword', 'passwordResetAt', 'passwordResetBy',
                           'lastLoginAt', 'updatedAt', 'updatedBy'];
@@ -56,21 +126,17 @@ service cloud.firestore {
 
     // Users collection with enhanced security
     match /users/{userId} {
-      // Users can read their own doc, admins can read all
       allow read: if isSignedIn() &&
                      (request.auth.uid == userId || isAdmin());
-      
-      // Only allow creation by the user themselves with validated fields
-      allow create: if isSignedIn() && 
+
+      allow create: if isSignedIn() &&
                        request.auth.uid == userId &&
                        isValidUserCreate();
-      
-      // Updates: self or admin, with field validation
+
       allow update: if isSignedIn() &&
                        (request.auth.uid == userId || isAdmin()) &&
                        isValidUserUpdate();
-      
-      // Only admins can delete users
+
       allow delete: if isAdmin();
     }
 
@@ -81,15 +147,12 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
-    // Attendance records with field validation
+    // Attendance — GPS wajib di server (client bisa dibypass)
     match /attendances/{attendanceId} {
-      allow create: if isActiveUser() &&
-                       request.resource.data.keys().hasOnly(['userId', 'timestamp', 'type', 'location', 'photoUrl', 'notes']);
+      allow create: if isActiveUser() && isValidAttendanceCreate();
       allow read: if isSignedIn() &&
                      (request.auth.uid == resource.data.userId || isAdmin());
-      allow update: if isSignedIn() &&
-                       request.auth.uid == resource.data.userId &&
-                       request.resource.data.keys().hasOnly(['location', 'photoUrl', 'notes', 'updatedAt']);
+      allow update: if isActiveUser() && isValidAttendanceUpdate();
       allow delete: if isAdmin();
     }
 
@@ -111,8 +174,8 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
-    
-    // Default deny rule for any unmatched collections
+
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }

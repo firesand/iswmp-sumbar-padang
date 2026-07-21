@@ -157,19 +157,22 @@ Koordinat provisional tetap disimpan agar development dan seed bisa berjalan, te
   checkInPhoto: string,             // Storage URL
   checkOutPhoto: string | null,
 
-  // GPS
-  location: {
+  // GPS — check-in wajib punya koordinat aktual
+  checkInLocation: {
     lat: number,
     lng: number,
-    accuracy: number
+    accuracy: number | null,
+    source: "gps-high" | "gps-low" | string,
+    capturedAt: number | null
   },
-  assignedLocation: {               // titik yang divalidasi
-    lat: number,
-    lng: number,
-    radius: number
-  },
-  distance: number,                 // meter dari titik penugasan
-  isWithinRadius: boolean,
+  checkOutLocation: { lat, lng, accuracy, source, capturedAt } | null,
+
+  locationSource: string | null,
+  locationAccuracy: number | null,   // wajib ≤ 500 jika diisi
+  distanceFromGeofence: number | null,
+  geofenceId: string | null,
+  geofenceName: string | null,
+  transitionMode: boolean,
 
   // Status
   status: "ontime" | "late" | "outside_radius" | "manual",
