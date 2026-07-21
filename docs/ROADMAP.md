@@ -10,7 +10,8 @@
 - [x] Keputusan: KorKot **tidak** akses admin dashboard
 - [x] Keputusan: metode registrasi = **self-register + approval**
 - [x] Input daftar 11 kelurahan
-- [ ] Tentukan koordinat kantor kota Padang
+- [x] Tentukan koordinat kantor kota Padang (Pasir Nan Tigo / Muaro Penjalinan)
+- [ ] Verifikasi lapangan & aktifkan geofence kantor
 
 ---
 

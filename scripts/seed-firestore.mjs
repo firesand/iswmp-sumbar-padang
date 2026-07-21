@@ -84,7 +84,12 @@ async function seed() {
     lat: KANTOR_SEED.lat,
     lng: KANTOR_SEED.lng,
     radius: KANTOR_SEED.radius,
+    // Koordinat sudah diisi, tapi tetap nonaktif sampai verifikasi lapangan.
     isActive: false,
+    coordinateStatus: KANTOR_SEED.coordinateStatus,
+    coordinateSource: KANTOR_SEED.coordinateSource,
+    coordinateSourceUrl: KANTOR_SEED.coordinateSourceUrl,
+    verifiedAt: KANTOR_SEED.verifiedAt,
     catatan: KANTOR_SEED.catatan,
     createdAt: now,
     updatedAt: now,

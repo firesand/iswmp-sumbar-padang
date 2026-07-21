@@ -55,20 +55,24 @@ Koordinat provisional tetap disimpan agar development dan seed bisa berjalan, te
 {
   id: "kantor-padang-kota",
   nama: "Kantor ISWMP Kota Padang",
-  alamat: null,                       // ⏳ to be filled
+  alamat: "Jl. Raya Pasir Nan Tigo, Muaro Penjalinan, Kota Padang",
   kota: "Padang",
   provinsi: "Sumatera Barat",
-  lat: null,                          // ⏳ BELUM DITENTUKAN
-  lng: null,                          // ⏳ BELUM DITENTUKAN
+  lat: -0.861081,
+  lng: 100.337068,
   radius: 200,                        // meter, default 200
-  isActive: false,                      // aktif setelah koordinat diisi
-  catatan: "Koordinat kantor belum ditentukan",
+  isActive: false,                    // aktif setelah verifikasi lapangan
+  coordinateStatus: "provisional",
+  coordinateSource: "Konfirmasi user",
+  coordinateSourceUrl: "https://www.google.com/maps?q=-0.861081,100.337068",
+  verifiedAt: null,
+  catatan: "Koordinat dikonfirmasi user (21 Jul 2026); verifikasi lapangan sebelum aktivasi geofence",
   createdAt: Timestamp,
   updatedAt: Timestamp
 }
 ```
 
-**Jumlah record:** 1 (untuk 4 orang tim kantor)
+**Jumlah record:** 1 (untuk 5 orang tim kantor)
 
 ---
 

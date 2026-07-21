@@ -19,7 +19,7 @@ Sistem absensi berfungsi sebagai **crosscheck kehadiran**, bukan pengganti siste
 | Wilayah | Jumlah lokasi | Status koordinat |
 |---------|---------------|------------------|
 | 11 Kelurahan (Kota Padang) | 11 titik geofence | Belum diinput |
-| Kantor Kota Padang | 1 titik geofence | **Belum ditentukan** |
+| Kantor Kota Padang | 1 titik geofence | Jl. Raya Pasir Nan Tigo, Muaro Penjalinan (−0.861081, 100.337068) — provisional |
 
 ---
 
@@ -39,7 +39,7 @@ Penugasan: **2 tenaga ahli per kelurahan** × 11 kelurahan.
 
 ### 3.2 Tim Kantor Kota Padang — 4 orang
 
-Berkantor di Kota Padang. **Lokasi kantor belum ditentukan** — geofence akan dikonfigurasi setelah koordinat tersedia.
+Berkantor di Kota Padang. **Lokasi:** Jl. Raya Pasir Nan Tigo, Muaro Penjalinan (−0.861081, 100.337068). Geofence provisional; aktifkan setelah verifikasi lapangan.
 
 | Peran | Kode | Jumlah | Keterangan |
 |-------|------|--------|------------|
@@ -48,7 +48,7 @@ Berkantor di Kota Padang. **Lokasi kantor belum ditentukan** — geofence akan d
 | Operator | `OPERATOR` | 2 | Operasional kantor |
 | Office Boy | `OFFICE_BOY` | 1 | Dukungan operasional kantor |
 
-- Absensi di **kantor kota Padang** (satu geofence, setelah koordinat ditentukan)
+- Absensi di **kantor kota Padang** (satu geofence di Pasir Nan Tigo / Muaro Penjalinan)
 - Peran berbeda, lokasi absensi sama
 
 ### 3.3 Admin Sistem
@@ -95,7 +95,7 @@ Berkantor di Kota Padang. **Lokasi kantor belum ditentukan** — geofence akan d
 ### 6.1 Multi-lokasi geofence
 
 - Koleksi `kelurahan` — 11 record
-- Koleksi `kantor` — 1 record (Kantor Kota Padang, koordinat TBD)
+- Koleksi `kantor` — 1 record (Kantor Kota Padang, Pasir Nan Tigo / Muaro Penjalinan)
 - User ditautkan ke **satu lokasi absensi** via `assignmentType`:
   - `kelurahan` → `kelurahanId`
   - `kantor` → `kantorId`
@@ -156,9 +156,9 @@ VITE_PROJECT_NAME=ISWMP SumBar-Padang
 VITE_PROJECT_REGION=Sumatera Barat
 VITE_PROJECT_CITY=Padang
 
-# Kantor Kota Padang (TBD — isi setelah koordinat ditentukan)
-VITE_KANTOR_KOTA_LAT=
-VITE_KANTOR_KOTA_LNG=
+# Kantor Kota Padang (Firestore — koordinat aktual di Firestore koleksi `kantor`)
+VITE_KANTOR_KOTA_LAT=-0.861081
+VITE_KANTOR_KOTA_LNG=100.337068
 VITE_KANTOR_KOTA_RADIUS=200
 
 # Jam kerja
@@ -182,7 +182,7 @@ Koordinat 11 kelurahan disimpan di Firestore (`kelurahan` collection), bukan env
 |------|--------|
 | Daftar 11 kelurahan (nama + kecamatan) | ✅ Dikonfirmasi — 11 kelurahan, 5 kecamatan |
 | Koordinat GPS per kelurahan | 🟡 Marker kantor Google Maps tersedia; menunggu verifikasi lapangan |
-| Koordinat kantor kota Padang | ⏳ **Belum ditentukan** |
+| Koordinat kantor kota Padang | 🟡 Pasir Nan Tigo / Muaro Penjalinan (−0.861081, 100.337068); menunggu verifikasi lapangan |
 | Radius geofence per lokasi | ⏳ Perlu kalibrasi lapangan |
 | Jam absensi resmi proyek | ⏳ Menunggu konfirmasi |
 | Nama resmi proyek untuk branding UI | ⏳ ISWMP SumBar-Padang (draft) |

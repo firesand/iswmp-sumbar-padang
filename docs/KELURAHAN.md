@@ -83,11 +83,13 @@ Master data executable berada di `src/data/seedData.js`. Script `scripts/seed-fi
 | Item | Nilai |
 |------|-------|
 | Nama | Kantor ISWMP Kota Padang |
-| Alamat | _belum ditentukan_ |
-| Lat | _belum ditentukan_ |
-| Lng | _belum ditentukan_ |
+| Alamat | Jl. Raya Pasir Nan Tigo, Muaro Penjalinan, Kota Padang |
+| Lat | -0.861081 |
+| Lng | 100.337068 |
 | Radius | 200 m (default) |
-| Staff | KorKot (1) + Asisten Manajemen Data (1) + Operator (2) = **4 orang** |
+| Status | provisional (dikonfirmasi user 21 Jul 2026; menunggu verifikasi lapangan) |
+| Maps | https://www.google.com/maps?q=-0.861081,100.337068 |
+| Staff | KorKot (1) + Asisten Manajemen Data (1) + Operator (2) + Office Boy (1) = **5 orang** |
 
 ---
 
@@ -110,6 +112,7 @@ Master data executable berada di `src/data/seedData.js`. Script `scripts/seed-fi
 - [x] Kandidat koordinat Google Maps untuk 11 kantor tersedia
 - [ ] Koordinat GPS diverifikasi di setiap kantor kelurahan
 - [ ] Radius geofence dikalibrasi per lokasi
-- [ ] Koordinat kantor kota Padang ditentukan
+- [x] Koordinat kantor kota Padang ditentukan (Pasir Nan Tigo / Muaro Penjalinan)
+- [ ] Koordinat kantor kota diverifikasi lapangan dan `isActive: true`
 - [ ] Nama TA per kelurahan di-assign
 - [ ] Data di-import ke Firestore

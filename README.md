@@ -24,7 +24,7 @@ Aplikasi ini berfungsi sebagai **alat crosscheck kehadiran** tim proyek ISWMP di
 | Kategori | Jumlah | Lokasi absensi |
 |----------|--------|----------------|
 | Tenaga Ahli Lapangan | 22 | 11 kelurahan (2 TA per kelurahan) |
-| Tim Kantor Kota Padang | 5 | Kantor kota *(koordinat belum ditentukan)* |
+| Tim Kantor Kota Padang | 5 | Kantor kota — Jl. Raya Pasir Nan Tigo, Muaro Penjalinan |
 | **Total pengguna absensi** | **27** | — |
 
 Detail peran: [docs/ORGANIZATION.md](./docs/ORGANIZATION.md) · daftar nama: [docs/PERSONIL.md](./docs/PERSONIL.md)
@@ -70,7 +70,7 @@ ISWMP-SumBar-Padang/
 ## Langkah Selanjutnya
 
 1. Verifikasi lapangan titik provisional 11 kantor kelurahan di [docs/KELURAHAN.md](./docs/KELURAHAN.md)
-2. Tentukan koordinat kantor kota Padang (4 orang tim kantor)
+2. Verifikasi lapangan koordinat kantor kota Padang (Pasir Nan Tigo / Muaro Penjalinan) lalu aktifkan geofence
 3. Jalankan seed Firestore setelah menyiapkan service account
 4. Uji registrasi TA dan check-in dalam mode transisi
 5. Kalibrasi radius sebelum mengaktifkan geofence per kelurahan

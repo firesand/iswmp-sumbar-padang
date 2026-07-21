@@ -133,14 +133,18 @@ export const KELURAHAN_SEED = [
 export const KANTOR_SEED = {
   id: 'kantor-padang-kota',
   nama: 'Kantor ISWMP Kota Padang',
-  alamat: null,
+  alamat: 'Jl. Raya Pasir Nan Tigo, Muaro Penjalinan, Kota Padang',
   kota: 'Padang',
   provinsi: 'Sumatera Barat',
-  lat: null,
-  lng: null,
+  lat: -0.861081,
+  lng: 100.337068,
   radius: 200,
   isActive: false,
-  catatan: 'Koordinat kantor belum ditentukan',
+  coordinateStatus: 'provisional',
+  coordinateSource: 'Konfirmasi user',
+  coordinateSourceUrl: 'https://www.google.com/maps?q=-0.861081,100.337068',
+  verifiedAt: null,
+  catatan: 'Koordinat dikonfirmasi user (21 Jul 2026); verifikasi lapangan sebelum aktivasi geofence',
 };
 
 export const PROJECT_CONFIG_SEED = {

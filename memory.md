@@ -117,7 +117,7 @@ ISWMP SumBar-Padang
 │
 ├── Admin Sistem (1–2) ─────────────── tidak wajib absen
 │
-├── Tim Kantor Kota Padang (4) ────── absensi di 1 geofence kantor (TBD)
+├── Tim Kantor Kota Padang (5) ────── absensi di 1 geofence kantor (Pasir Nan Tigo)
 │   ├── KorKot (KORKOT) × 1
 │   ├── Asisten Manajemen Data (ASMAN_DATA) × 1
 │   ├── Operator (OPERATOR) × 2
@@ -177,7 +177,7 @@ ISWMP SumBar-Padang
 |------|--------|--------|
 | Daftar 11 kelurahan | Seed geofence | ✅ `docs/KELURAHAN.md` |
 | Koordinat GPS kelurahan | Validasi radius TA | 🟡 11/11 marker provisional; verifikasi lapangan belum dilakukan |
-| Koordinat kantor Padang | Validasi radius kantor | ⏳ TBD |
+| Koordinat kantor Padang | Validasi radius kantor | 🟡 Pasir Nan Tigo (−0.861081, 100.337068); provisional |
 | Seed Firestore (`kelurahan`, `kantor`) | Dropdown/register dari DB | ⏳ jalankan `npm run seed` |
 | Akun admin produksi | Approve registrasi user | ⏳ belum dibuat |
 | Assign nama TA per kelurahan | Matriks dashboard | ⏳ daftar nama ✅ `docs/PERSONIL.md`; kelurahan per orang masih TBD |
@@ -288,7 +288,7 @@ Koleksi `users` → edit dokumen:
 | 2026-07-10 | Firebase go-live + registrasi | Auth/Firestore/Storage OK, rules deployed, login OK |
 | 2026-07-11 | Riset dan normalisasi lokasi kelurahan | 11 marker kantor provisional, 5 kecamatan, seed lokal diperbarui |
 | 2026-07-20 | Security pull + deploy rules; personil Excel | `docs/PERSONIL.md` (26 orang; PPM/PPL mapping) |
-| 2026-07-20 | Firebase Hosting config + deploy | Live: https://iswmp-sumbar-padang.web.app |
+| 2026-07-21 | Koordinat kantor proyek | Pasir Nan Tigo / Muaro Penjalinan (−0.861081, 100.337068) |
 
 ---
 
@@ -302,7 +302,7 @@ Koleksi `users` → edit dokumen:
 - API key benar: `AIzaSyCS0zQzf22j4**tt**DA6pYeOlrNxaacZ7Cqk4` (perhatikan `tt` bukan `tT`)
 - `firebase.credentials.js` = fallback jika `.env.local` bermasalah
 - KorKot = `office_staff`, bukan `admin`
-- Kantor = **1 geofence** untuk 4 orang
+- Kantor = **1 geofence** untuk 5 orang — Jl. Raya Pasir Nan Tigo, Muaro Penjalinan (−0.861081, 100.337068), provisional / `isActive: false`
 - Total absensi = **26** (bukan 22)
 - Total cakupan = **11 kelurahan di 5 kecamatan**
 - Nama canonical: Lubuk Begalung Nan XX, Tanjung Aur Nan XX, Parupuk Tabing
@@ -320,3 +320,4 @@ Koleksi `users` → edit dokumen:
 | 0.4.0 | 2026-07-10 | Firebase go-live, rules deployed, registrasi & login OK, testing user KorKot |
 | 0.4.1 | 2026-07-10 | Fix celah GPS: no fallback, no accuracy bypass, audit fields di attendance |
 | 0.5.0 | 2026-07-11 | Normalisasi 11 kelurahan, 11 marker kantor provisional, seed satu sumber, geofence tetap nonaktif |
+| 0.5.1 | 2026-07-21 | Koordinat kantor proyek: Pasir Nan Tigo / Muaro Penjalinan (−0.861081, 100.337068) |

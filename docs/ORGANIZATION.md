@@ -7,7 +7,7 @@
 | Kategori | Jumlah | Lokasi kerja | Tipe absensi |
 |----------|--------|--------------|--------------|
 | Tenaga Ahli Lapangan | 22 | 11 kelurahan | Geofence kelurahan |
-| Tim Kantor Kota Padang | 5 | Kantor kota *(TBD)* | Geofence kantor |
+| Tim Kantor Kota Padang | 5 | Kantor kota (Pasir Nan Tigo / Muaro Penjalinan) | Geofence kantor |
 | Admin Sistem | 1–2 | — | Tidak absen / opsional |
 | **Total** | **28–29** | | |
 
@@ -58,7 +58,7 @@ Kelurahan [N]
 
 ## 2. Tim Kantor Kota Padang (5 orang)
 
-Berkantor di **Kota Padang**. Lokasi kantor **belum ditentukan** — akan dikonfigurasi sebagai satu geofence setelah koordinat tersedia.
+Berkantor di **Kota Padang** — Jl. Raya Pasir Nan Tigo, Muaro Penjalinan (−0.861081, 100.337068). Geofence provisional; aktifkan setelah verifikasi lapangan.
 
 ### Daftar peran
 
@@ -132,10 +132,10 @@ Super Admin
 |-----------|--------|----------------|----------|
 | TA Persampahan | 11 | Masing-masing kelurahan | 11 geofence berbeda |
 | TA Kelembagaan | 11 | Masing-masing kelurahan | 11 geofence berbeda |
-| KorKot | 1 | Kantor kota Padang | 1 geofence (TBD) |
-| Asisten Manajemen Data | 1 | Kantor kota Padang | 1 geofence (TBD) |
-| Operator | 2 | Kantor kota Padang | 1 geofence (TBD) |
-| Office Boy | 1 | Kantor kota Padang | 1 geofence (TBD) |
+| KorKot | 1 | Kantor kota Padang | 1 geofence (Pasir Nan Tigo) |
+| Asisten Manajemen Data | 1 | Kantor kota Padang | 1 geofence (Pasir Nan Tigo) |
+| Operator | 2 | Kantor kota Padang | 1 geofence (Pasir Nan Tigo) |
+| Office Boy | 1 | Kantor kota Padang | 1 geofence (Pasir Nan Tigo) |
 
 **Total geofence: 12** (11 kelurahan + 1 kantor)
 
