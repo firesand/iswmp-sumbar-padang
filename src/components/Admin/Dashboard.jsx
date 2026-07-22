@@ -7,6 +7,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -34,6 +35,18 @@ import DeleteEmployeeModal from './DeleteEmployeeModal';
 import DailyReminderPanel from './DailyReminderPanel';
 import { ADMIN_CONFIG, validateAdminConfig } from '../../config/adminConfig';
 
+const getRegistrationTime = (registration) => {
+  const timestamp = registration.requestedAt || registration.registeredAt || registration.createdAt;
+  if (!timestamp) return 0;
+  if (typeof timestamp.toMillis === 'function') return timestamp.toMillis();
+  if (typeof timestamp.toDate === 'function') return timestamp.toDate().getTime();
+  const parsedTime = new Date(timestamp).getTime();
+  return Number.isNaN(parsedTime) ? 0 : parsedTime;
+};
+
+const sortRegistrationsByNewest = (registrations) =>
+  [...registrations].sort((a, b) => getRegistrationTime(b) - getRegistrationTime(a));
+
 function AdminDashboard() {
   const navigate = useNavigate();
 
@@ -44,6 +57,7 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [pendingRegistrations, setPendingRegistrations] = useState([]);
+  const [pendingRegistrationsError, setPendingRegistrationsError] = useState('');
   const [employees, setEmployees] = useState([]);
   const [todayAttendances, setTodayAttendances] = useState([]);
   const [processingId, setProcessingId] = useState(null);
@@ -117,6 +131,7 @@ function AdminDashboard() {
         let registrations = [];
         try {
           console.log('Fetching pending registrations...');
+          setPendingRegistrationsError('');
           const registrationsQuery = query(
             collection(db, 'registrationRequests'),
             where('status', '==', 'pending'),
@@ -127,7 +142,6 @@ function AdminDashboard() {
             id: doc.id,
             ...doc.data()
           }));
-          setPendingRegistrations(registrations);
           console.log('Pending registrations loaded:', registrations.length);
           console.log('Registration details:', registrations.map(reg => ({
             id: reg.id,
@@ -139,7 +153,7 @@ function AdminDashboard() {
           })));
         } catch (regError) {
           console.error('Error fetching registrations:', regError);
-          setPendingRegistrations([]);
+          setPendingRegistrationsError('Data pending approval gagal dimuat. Silakan muat ulang halaman.');
         }
 
         // Fetch all employees
@@ -160,6 +174,46 @@ function AdminDashboard() {
         } catch (empError) {
           console.error('Error fetching employees:', empError);
           setEmployees([]);
+        }
+
+        // Registration requests intentionally store only queue metadata. Join
+        // them with user profiles for the details shown to administrators.
+        const employeesById = new Map(
+          employeesList.map(employee => [employee.id, employee])
+        );
+        registrations = registrations.map(registration => ({
+          ...(employeesById.get(registration.userId) || {}),
+          ...registration
+        }));
+
+        // Recover older partial registrations where a pending user profile was
+        // saved but registrationRequests was rejected by the previous rules.
+        const requestedUserIds = new Set(
+          registrations.map(registration => registration.userId || registration.id)
+        );
+        const recoveredRegistrations = employeesList
+          .filter(employee =>
+            employee.accountStatus === 'pending' && !requestedUserIds.has(employee.id)
+          )
+          .map(employee => ({
+            ...employee,
+            id: employee.id,
+            userId: employee.id,
+            status: 'pending',
+            requestedAt: employee.registeredAt || employee.createdAt,
+            recoveredFromUserProfile: true
+          }));
+
+        registrations = sortRegistrationsByNewest([
+          ...registrations,
+          ...recoveredRegistrations
+        ]);
+        setPendingRegistrations(registrations);
+
+        if (recoveredRegistrations.length > 0) {
+          console.warn(
+            `Recovered ${recoveredRegistrations.length} pending registration(s) from user profiles`
+          );
         }
 
         // Fetch today's attendances
@@ -345,12 +399,14 @@ function AdminDashboard() {
                       approvedBy: auth.currentUser.uid
       });
 
-      // Update registration request
-      await updateDoc(doc(db, 'registrationRequests', registration.id), {
+      // setDoc with merge also handles a recovered pending profile whose
+      // registrationRequests document was rejected by older Firestore rules.
+      await setDoc(doc(db, 'registrationRequests', registration.id), {
+        userId: registration.userId,
         status: 'approved',
         reviewedBy: auth.currentUser.uid,
         reviewedAt: Timestamp.now()
-      });
+      }, { merge: true });
 
       // Remove from pending list
       setPendingRegistrations(prev => prev.filter(r => r.id !== registration.id));
@@ -359,19 +415,28 @@ function AdminDashboard() {
       const userDoc = await getDoc(doc(db, 'users', registration.userId));
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        setEmployees(prev => [...prev, { id: registration.userId, ...userData }]);
+        setEmployees(prev => {
+          const employeeExists = prev.some(employee => employee.id === registration.userId);
+          return employeeExists
+            ? prev.map(employee =>
+              employee.id === registration.userId
+                ? { id: registration.userId, ...userData }
+                : employee
+            )
+            : [...prev, { id: registration.userId, ...userData }];
+        });
 
         // Send notifications based on selected method
         let notificationsSent = [];
 
         // WhatsApp notification
         if ((notificationSettings.method === 'whatsapp' || notificationSettings.method === 'both')
-          && userData.phoneNumber) {
+          && (userData.phoneNumber || userData.phone)) {
           try {
             notifyApprovalViaWhatsApp({
               name: userData.name,
               email: userData.email,
-              phoneNumber: userData.phoneNumber
+              phoneNumber: userData.phoneNumber || userData.phone
             }, 'approved');
             notificationsSent.push('WhatsApp');
             console.log('WhatsApp notification opened');
@@ -426,11 +491,18 @@ function AdminDashboard() {
 
     setProcessingId(registration.id);
     try {
-      // Update registration request
-      await updateDoc(doc(db, 'registrationRequests', registration.id), {
+      await setDoc(doc(db, 'registrationRequests', registration.id), {
+        userId: registration.userId,
         status: 'rejected',
         reviewedBy: auth.currentUser.uid,
         reviewedAt: Timestamp.now()
+      }, { merge: true });
+
+      await updateDoc(doc(db, 'users', registration.userId), {
+        accountStatus: 'rejected',
+        isActive: false,
+        rejectedAt: Timestamp.now(),
+        rejectedBy: auth.currentUser.uid
       });
 
       // Get user data for notification
@@ -440,11 +512,11 @@ function AdminDashboard() {
 
         // Send rejection notifications
         if ((notificationSettings.method === 'whatsapp' || notificationSettings.method === 'both')
-          && userData.phoneNumber) {
+          && (userData.phoneNumber || userData.phone)) {
           notifyApprovalViaWhatsApp({
             name: userData.name,
             email: userData.email,
-            phoneNumber: userData.phoneNumber
+            phoneNumber: userData.phoneNumber || userData.phone
           }, 'rejected');
           }
 
@@ -458,6 +530,15 @@ function AdminDashboard() {
 
       // Remove from pending list
       setPendingRegistrations(prev => prev.filter(r => r.id !== registration.id));
+      setEmployees(prev => prev.map(employee =>
+        employee.id === registration.userId
+          ? { ...employee, accountStatus: 'rejected', isActive: false }
+          : employee
+      ));
+      setStats(prev => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1)
+      }));
 
       alert(`Registration rejected for ${registration.name}`);
     } catch (error) {
@@ -868,6 +949,45 @@ function AdminDashboard() {
     </div>
 
     <div className="max-w-7xl mx-auto px-2 sm:px-4 py-6">
+    {pendingRegistrationsError && (
+      <div
+        role="alert"
+        className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-red-300 bg-red-50 p-4 shadow-sm"
+      >
+        <p className="font-medium text-red-900">⚠️ {pendingRegistrationsError}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+        >
+          Muat Ulang
+        </button>
+      </div>
+    )}
+
+    {pendingRegistrations.length > 0 && (
+      <div
+        role="alert"
+        className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-orange-300 bg-orange-50 p-4 shadow-sm"
+      >
+        <div>
+          <p className="font-semibold text-orange-900">
+            🔔 {pendingRegistrations.length} registrasi menunggu persetujuan
+          </p>
+          <p className="mt-1 text-sm text-orange-800">
+            Periksa data pendaftar lalu setujui atau tolak permohonannya.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('approvals')}
+          className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-orange-700"
+        >
+          Lihat Pending Approval
+        </button>
+      </div>
+    )}
+
     {/* Stats Overview */}
     <div className="grid grid-cols-2 md:grid-cols-5 gap-2 sm:gap-4 mb-6">
     <div className="bg-white rounded-xl shadow-md p-3 sm:p-6">
@@ -1206,10 +1326,10 @@ function AdminDashboard() {
           <div className="flex-1">
           <h4 className="font-semibold text-gray-800">{registration.name}</h4>
           <p className="text-sm text-gray-600 mt-1">Email: {registration.email}</p>
-          <p className="text-sm text-gray-600">Phone: {registration.phoneNumber || 'Not provided'}</p>
+          <p className="text-sm text-gray-600">Phone: {registration.phoneNumber || registration.phone || 'Not provided'}</p>
           <p className="text-sm text-gray-600">NIK: {registration.nik}</p>
           <p className="text-sm text-gray-600">
-          Requested: {formatDate(registration.requestedAt)}
+          Requested: {formatDate(registration.requestedAt || registration.registeredAt || registration.createdAt)}
           </p>
           </div>
           <div className="flex space-x-2">

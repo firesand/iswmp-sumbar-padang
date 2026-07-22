@@ -47,7 +47,7 @@ function Login() {
         return;
       }
 
-      if (userData.accountStatus === 'suspended' || userData.accountStatus === 'resigned') {
+      if (['suspended', 'resigned', 'rejected'].includes(userData.accountStatus)) {
         await auth.signOut();
         setError('Akun Anda tidak aktif');
         setLoading(false);

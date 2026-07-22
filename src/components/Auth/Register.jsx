@@ -1,7 +1,7 @@
 // src/components/Auth/Register.jsx
 import { useState } from 'react';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../../config/firebase';
 import { useNavigate } from 'react-router-dom';
@@ -99,6 +99,8 @@ function Register() {
     setLoading(true);
     setIsSubmitting(true);
     setRegistrationStep('processing');
+    let createdNewAuthUser = false;
+    let recoveringIncompleteRegistration = false;
 
     try {
       console.log('🚀 Starting registration process...');
@@ -124,13 +126,41 @@ function Register() {
 
       // Create Firebase user
       console.log('👤 Creating Firebase user...');
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        formData.email,
-        formData.password
-      );
-      const user = userCredential.user;
-      console.log('✅ Firebase user created:', user.uid);
+      let user;
+      try {
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+        user = userCredential.user;
+        createdNewAuthUser = true;
+        console.log('✅ Firebase user created:', user.uid);
+      } catch (authError) {
+        if (authError.code !== 'auth/email-already-in-use') {
+          throw authError;
+        }
+
+        // Registrations attempted while the July 20 rules were broken may
+        // have an Auth account but no Firestore profile. Verify ownership with
+        // the original password, then safely finish that registration.
+        console.warn('⚠️ Existing email detected; checking incomplete registration...');
+        const existingCredential = await signInWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+        user = existingCredential.user;
+
+        const existingUserDoc = await getDoc(doc(db, 'users', user.uid));
+        if (existingUserDoc.exists()) {
+          await auth.signOut();
+          throw authError;
+        }
+
+        recoveringIncompleteRegistration = true;
+        console.log('✅ Incomplete registration verified and ready for recovery:', user.uid);
+      }
 
       // Upload photo if provided (with comprehensive CSP error handling)
       let photoURL = '';
@@ -164,7 +194,7 @@ function Register() {
       });
       console.log('✅ Profile updated');
 
-      // Create user document (with error handling)
+      // Create user document
       console.log('📄 Creating user document...');
       const userData = {
         uid: user.uid,
@@ -180,9 +210,9 @@ function Register() {
         isActive: false,
         provinsi: 'Sumatera Barat',
         kota: 'Padang',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
         location: location,
-        lastLogin: new Date(),
+        lastLogin: serverTimestamp(),
         ...(formData.staffCategory === 'field_staff' ? {
           assignmentType: 'kelurahan',
           kelurahanId: formData.kelurahanId,
@@ -195,48 +225,23 @@ function Register() {
         }),
       };
 
-      try {
-        await setDoc(doc(db, 'users', user.uid), userData);
-        console.log('✅ User document created');
-      } catch (userDocError) {
-        console.warn('⚠️ User document creation failed, but continuing:', userDocError);
-        // Continue without user document - admin can create manually
-      }
-
-      // Create registration request (with error handling)
+      // Keep registration requests minimal. Full applicant details live in the
+      // users collection and are joined by the admin dashboard.
       console.log('📋 Creating registration request...');
       const registrationData = {
         userId: user.uid,
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        nik: formData.nik,
-        address: formData.address,
-        photoURL: photoURL,
-        role: formData.staffCategory,
+        requestedBy: user.uid,
+        requestedAt: serverTimestamp(),
         status: 'pending',
-        createdAt: new Date(),
-        requestedAt: new Date(),
-        location: location,
-        ...(formData.staffCategory === 'field_staff' ? {
-          assignmentType: 'kelurahan',
-          kelurahanId: formData.kelurahanId,
-          kelurahanNama: selectedKelurahan?.nama || '',
-          jenisTenagaAhli: formData.jenisTenagaAhli,
-        } : {
-          assignmentType: 'kantor',
-          kantorId: 'kantor-padang-kota',
-          peranKantor: formData.peranKantor,
-        }),
       };
 
-      try {
-        await setDoc(doc(db, 'registrationRequests', user.uid), registrationData);
-        console.log('✅ Registration request created');
-      } catch (registrationError) {
-        console.warn('⚠️ Registration request creation failed, but continuing:', registrationError);
-        // Continue without registration request - admin can see user in Firebase Auth
-      }
+      // Both documents must succeed together. Never show a success message if
+      // the admin approval request was rejected by Firestore rules.
+      const registrationBatch = writeBatch(db);
+      registrationBatch.set(doc(db, 'users', user.uid), userData);
+      registrationBatch.set(doc(db, 'registrationRequests', user.uid), registrationData);
+      await registrationBatch.commit();
+      console.log('✅ User document and registration request created');
 
       // SUCCESS - Show success state and handle navigation properly
       console.log('✅ Registration completed successfully');
@@ -248,7 +253,11 @@ function Register() {
 
       // Show success message
       try {
-        alert('Registrasi berhasil! Akun Anda sedang menunggu persetujuan admin. Anda akan dialihkan ke halaman utama.');
+        alert(
+          recoveringIncompleteRegistration
+            ? 'Registrasi sebelumnya berhasil dipulihkan! Akun Anda sekarang menunggu persetujuan admin.'
+            : 'Registrasi berhasil! Akun Anda sedang menunggu persetujuan admin. Anda akan dialihkan ke halaman utama.'
+        );
       } catch (alertError) {
         console.error('❌ Alert failed:', alertError);
       }
@@ -262,9 +271,11 @@ function Register() {
 
       // Clean up on failure
       try {
-        if (auth.currentUser) {
+        if (auth.currentUser && createdNewAuthUser) {
           await auth.currentUser.delete();
           console.log('✅ Cleaned up failed user account');
+        } else if (auth.currentUser) {
+          await auth.signOut();
         }
       } catch (cleanupError) {
         console.error('❌ Cleanup failed:', cleanupError);
@@ -273,6 +284,8 @@ function Register() {
       // Set specific error messages
       if (error.code === 'auth/email-already-in-use') {
         setError('Email sudah terdaftar');
+      } else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+        setError('Email sudah terdaftar. Gunakan password yang sama seperti saat registrasi sebelumnya.');
       } else if (error.code === 'auth/network-request-failed') {
         setError('Koneksi internet bermasalah. Silakan coba lagi.');
       } else if (error.code === 'auth/weak-password') {
@@ -281,6 +294,8 @@ function Register() {
         setError('Format email tidak valid');
       } else if (error.code === 'auth/operation-not-allowed') {
         setError('Registrasi email/password tidak diizinkan');
+      } else if (error.code === 'permission-denied' || error.code === 'firestore/permission-denied') {
+        setError('Data registrasi ditolak oleh sistem. Silakan hubungi admin.');
       } else {
         setError('Terjadi kesalahan: ' + error.message);
       }

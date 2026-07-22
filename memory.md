@@ -2,7 +2,7 @@
 
 > **Tujuan file ini:** Jembatan informasi keberlanjutan pembahasan proyek.  
 > Baca file ini di awal setiap sesi baru agar konteks tidak hilang.  
-> **Update terakhir:** 11 Juli 2026
+> **Update terakhir:** 22 Juli 2026
 
 ---
 
@@ -22,7 +22,7 @@
 | **Nama lengkap** | Integrated Solid Waste Management Project — Sumatera Barat, Kota Padang |
 | **Tujuan aplikasi** | Crosscheck kehadiran tim proyek (bukan HR/payroll) |
 | **Developer** | Hikmahtiar Studio |
-| **Status saat ini** | Fase 1 — Core adaptation (Firebase live, registrasi & login OK, belum seed & check-in uji) |
+| **Status saat ini** | Fase 1 — Firebase live; registrasi/approval diperbaiki dan dideploy, check-in masih tahap uji |
 | **Workspace lokal** | `~/iswmp-sumbar-padang/` |
 | **Repo ISWMP (GitHub)** | https://github.com/firesand/iswmp-sumbar-padang |
 | **Firebase project** | https://console.firebase.google.com/project/iswmp-sumbar-padang |
@@ -289,6 +289,7 @@ Koleksi `users` → edit dokumen:
 | 2026-07-11 | Riset dan normalisasi lokasi kelurahan | 11 marker kantor provisional, 5 kecamatan, seed lokal diperbarui |
 | 2026-07-20 | Security pull + deploy rules; personil Excel | `docs/PERSONIL.md` (26 orang; PPM/PPL mapping) |
 | 2026-07-21 | Koordinat kantor proyek | Pasir Nan Tigo / Muaro Penjalinan (−0.861081, 100.337068) |
+| 2026-07-22 | Fix registrasi dan pending approval | Selaraskan Firestore rules dengan model ISWMP, write atomik, banner admin, recovery akun Auth-only; rules + hosting dideploy |
 
 ---
 
@@ -309,6 +310,7 @@ Koleksi `users` → edit dokumen:
 - Kampung Pondok sementara: **Jl. Dobi VI No. 2**
 - Koordinat kantor kelurahan yang ada masih provisional dan `isActive: false`
 - Firestore masih kosong koleksi `kelurahan` sampai `npm run seed` dijalankan
+- Pendaftar saat rules rusak (setelah deploy keamanan 20 Jul) dapat mengulang form dengan email/password lama untuk memulihkan akun Auth-only
 
 ---
 
@@ -321,3 +323,4 @@ Koleksi `users` → edit dokumen:
 | 0.4.1 | 2026-07-10 | Fix celah GPS: no fallback, no accuracy bypass, audit fields di attendance |
 | 0.5.0 | 2026-07-11 | Normalisasi 11 kelurahan, 11 marker kantor provisional, seed satu sumber, geofence tetap nonaktif |
 | 0.5.1 | 2026-07-21 | Koordinat kantor proyek: Pasir Nan Tigo / Muaro Penjalinan (−0.861081, 100.337068) |
+| 0.6.0 | 2026-07-22 | Perbaiki regresi rules registrasi, pending approval, dan recovery akun; deploy production |

@@ -89,21 +89,56 @@ service cloud.firestore {
         );
     }
 
-    // Validate user document structure - prevent sensitive field exposure
-    function isValidUserCreate() {
-      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role',
-                          'accountStatus', 'createdAt', 'createdBy',
-                          'profileImage', 'position', 'department',
-                          'mustChangePassword', 'passwordResetAt', 'passwordResetBy'];
-      return request.resource.data.keys().hasOnly(allowedFields);
+    // Self-registration may only create a pending non-admin profile.
+    function isValidUserCreate(userId) {
+      let d = request.resource.data;
+      let allowedFields = [
+        'uid', 'name', 'displayName', 'email',
+        'phone', 'phoneNumber', 'nik', 'address',
+        'photoURL', 'photoUrl', 'profileImage',
+        'role', 'accountStatus', 'isActive',
+        'provinsi', 'kota',
+        'createdAt', 'registeredAt', 'createdBy', 'lastLogin',
+        'location',
+        'assignmentType', 'kelurahanId', 'kelurahanNama', 'jenisTenagaAhli',
+        'kantorId', 'peranKantor',
+        'employeeId', 'position', 'department', 'leaveBalance',
+        'mustChangePassword', 'passwordResetAt', 'passwordResetBy'
+      ];
+
+      return d.keys().hasOnly(allowedFields)
+        && d.keys().hasAll(['email', 'role', 'accountStatus', 'isActive'])
+        && d.email is string
+        && d.email == request.auth.token.email
+        && d.role in ['employee', 'field_staff', 'office_staff']
+        && d.accountStatus == 'pending'
+        && d.isActive == false
+        && (!d.keys().hasAny(['uid']) || d.uid == userId);
     }
 
-    function isValidUserUpdate() {
-      let allowedFields = ['displayName', 'email', 'phoneNumber', 'role',
-                          'accountStatus', 'profileImage', 'position', 'department',
-                          'mustChangePassword', 'passwordResetAt', 'passwordResetBy',
-                          'lastLoginAt', 'updatedAt', 'updatedBy'];
-      return request.resource.data.keys().hasOnly(allowedFields);
+    // A user may edit profile/contact data, but cannot promote or activate
+    // their own account. Administrative account changes remain admin-only.
+    function isValidSelfUserUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      return affected.hasOnly([
+        'name', 'displayName',
+        'phone', 'phoneNumber', 'address',
+        'photoURL', 'photoUrl', 'profileImage',
+        'bpjsNumber', 'bpjsCardNumber',
+        'emergencyContact', 'emergencyPhone',
+        'maritalStatus', 'numberOfChildren', 'joinDate',
+        'lastLogin', 'lastLoginAt', 'updatedAt'
+      ]);
+    }
+
+    function isValidRegistrationCreate() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['userId', 'requestedBy', 'requestedAt', 'status'])
+        && d.keys().hasAll(['userId', 'requestedBy', 'requestedAt', 'status'])
+        && d.userId == request.auth.uid
+        && d.requestedBy == request.auth.uid
+        && d.requestedAt is timestamp
+        && d.status == 'pending';
     }
 
     // Master data kelurahan — read semua user login, write admin
@@ -131,19 +166,17 @@ service cloud.firestore {
 
       allow create: if isSignedIn() &&
                        request.auth.uid == userId &&
-                       isValidUserCreate();
+                       isValidUserCreate(userId);
 
       allow update: if isSignedIn() &&
-                       (request.auth.uid == userId || isAdmin()) &&
-                       isValidUserUpdate();
+                       ((request.auth.uid == userId && isValidSelfUserUpdate()) || isAdmin());
 
       allow delete: if isAdmin();
     }
 
     // Registration requests - users can create, admins manage
     match /registrationRequests/{requestId} {
-      allow create: if isSignedIn() &&
-                       request.resource.data.keys().hasOnly(['userId', 'requestedBy', 'requestedAt', 'status']);
+      allow create: if (isSignedIn() && isValidRegistrationCreate()) || isAdmin();
       allow read, update, delete: if isAdmin();
     }
 

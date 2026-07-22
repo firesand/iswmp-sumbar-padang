@@ -181,8 +181,8 @@ function App() {
     }
 
     // Handle suspended users
-    if (userData.accountStatus === 'suspended' || userData.accountStatus === 'resigned') {
-      console.log('User is suspended/resigned');
+    if (['suspended', 'resigned', 'rejected'].includes(userData.accountStatus)) {
+      console.log('User is suspended/resigned/rejected');
       return (
         <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center">
           <div className="text-center">

@@ -4,7 +4,7 @@ import {
   signOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
 // Register new employee
@@ -19,8 +19,10 @@ export const registerEmployee = async (userData) => {
     
     const userId = userCredential.user.uid;
     
+    const registrationBatch = writeBatch(db);
+
     // Create user profile (pending status)
-    await setDoc(doc(db, 'users', userId), {
+    registrationBatch.set(doc(db, 'users', userId), {
       email: userData.email,
       name: userData.name,
       nik: userData.nik,
@@ -41,16 +43,15 @@ export const registerEmployee = async (userData) => {
       }
     });
     
-    // Create registration request for admin
-    await setDoc(doc(db, 'registrationRequests', userId), {
+    // Create minimal registration request for admin
+    registrationBatch.set(doc(db, 'registrationRequests', userId), {
       userId: userId,
-      email: userData.email,
-      name: userData.name,
-      nik: userData.nik,
-      employeeId: userData.employeeId,
+      requestedBy: userId,
       requestedAt: serverTimestamp(),
       status: 'pending'
     });
+
+    await registrationBatch.commit();
     
     // Sign out (can't login until approved)
     await signOut(auth);
@@ -118,4 +119,4 @@ export const getCurrentUser = async (userId) => {
 // Auth state listener
 export const onAuthStateChange = (callback) => {
   return onAuthStateChanged(auth, callback);
-}; 
+};
