@@ -47,6 +47,31 @@ const getRegistrationTime = (registration) => {
 const sortRegistrationsByNewest = (registrations) =>
   [...registrations].sort((a, b) => getRegistrationTime(b) - getRegistrationTime(a));
 
+const getGoogleMapsUrl = (location) => {
+  if (!location || typeof location !== 'object') return null;
+
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  const hasValidCoordinates = Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= -90
+    && lat <= 90
+    && lng >= -180
+    && lng <= 180
+    && !(lat === 0 && lng === 0);
+
+  if (!hasValidCoordinates) return null;
+
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`;
+};
+
+const getLocationAccuracy = (location, fallbackAccuracy = null) => {
+  const accuracy = Number(location?.accuracy ?? fallbackAccuracy);
+  return Number.isFinite(accuracy) && accuracy >= 0
+    ? `±${Math.round(accuracy)} m`
+    : null;
+};
+
 function AdminDashboard() {
   const navigate = useNavigate();
 
@@ -1246,12 +1271,22 @@ function AdminDashboard() {
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Check Out</th>
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Status</th>
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Hours</th>
+      <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Locations</th>
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Photos</th>
       </tr>
       </thead>
       <tbody>
       {todayAttendances.length > 0 ? (
-        todayAttendances.map((attendance) => (
+        todayAttendances.map((attendance) => {
+          const checkInMapsUrl = getGoogleMapsUrl(attendance.checkInLocation);
+          const checkOutMapsUrl = getGoogleMapsUrl(attendance.checkOutLocation);
+          const checkInAccuracy = getLocationAccuracy(
+            attendance.checkInLocation,
+            attendance.locationAccuracy
+          );
+          const checkOutAccuracy = getLocationAccuracy(attendance.checkOutLocation);
+
+          return (
           <tr key={attendance.id} className="border-b hover:bg-gray-50">
           <td className="py-3 px-2">
           <p className="font-medium text-gray-800 text-xs">{attendance.userName}</p>
@@ -1273,6 +1308,40 @@ function AdminDashboard() {
           </td>
           <td className="py-3 px-2 text-xs text-gray-600">
           {attendance.workHours ? `${attendance.workHours}h` : '-'}
+          </td>
+          <td className="py-3 px-2">
+          <div className="flex flex-col items-start gap-1">
+          {checkInMapsUrl && (
+            <a
+            href={checkInMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+            title="Buka lokasi check-in di Google Maps"
+            >
+            📍 Masuk {checkInAccuracy && `(${checkInAccuracy})`}
+            </a>
+          )}
+          {checkOutMapsUrl && (
+            <a
+            href={checkOutMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
+            title="Buka lokasi check-out di Google Maps"
+            >
+            📍 Keluar {checkOutAccuracy && `(${checkOutAccuracy})`}
+            </a>
+          )}
+          {!checkInMapsUrl && !checkOutMapsUrl && (
+            <span className="text-xs text-gray-400">-</span>
+          )}
+          {attendance.geofenceName && (
+            <span className="max-w-[180px] truncate text-[11px] text-gray-500" title={attendance.geofenceName}>
+            {attendance.geofenceName}
+            </span>
+          )}
+          </div>
           </td>
           <td className="py-3 px-2">
           <div className="flex space-x-2">
@@ -1299,10 +1368,11 @@ function AdminDashboard() {
           </div>
           </td>
           </tr>
-        ))
+          );
+        })
       ) : (
         <tr>
-        <td colSpan="6" className="text-center py-8 text-gray-500">
+        <td colSpan="7" className="text-center py-8 text-gray-500">
         No attendance records for today
         </td>
         </tr>
