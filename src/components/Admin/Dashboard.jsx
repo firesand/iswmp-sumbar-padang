@@ -33,6 +33,7 @@ import { adminPasswordReset } from '../../services/adminPasswordReset';
 import AdminNotificationPanel from './NotificationPanel';
 import DeleteEmployeeModal from './DeleteEmployeeModal';
 import DailyReminderPanel from './DailyReminderPanel';
+import IncompleteRegistrations from './IncompleteRegistrations';
 import { ADMIN_CONFIG, validateAdminConfig } from '../../config/adminConfig';
 
 const getRegistrationTime = (registration) => {
@@ -506,6 +507,22 @@ function AdminDashboard() {
     } finally {
       setProcessingId(null);
     }
+  };
+
+  const handleRecoveryQueued = (registration, userProfile) => {
+    setPendingRegistrations(previous => sortRegistrationsByNewest([
+      registration,
+      ...previous.filter(item => item.id !== registration.id),
+    ]));
+    setEmployees(previous => previous.some(employee => employee.id === userProfile.id)
+      ? previous.map(employee => employee.id === userProfile.id ? userProfile : employee)
+      : [...previous, userProfile]);
+    setStats(previous => ({
+      ...previous,
+      totalEmployees: previous.totalEmployees + 1,
+      pendingApprovals: previous.pendingApprovals + 1,
+    }));
+    setActiveTab('approvals');
   };
 
   // Reject registration with notifications
@@ -1167,6 +1184,16 @@ function AdminDashboard() {
     )}
     </button>
     <button
+    onClick={() => setActiveTab('recovery')}
+    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+      activeTab === 'recovery'
+      ? 'border-green-500 text-green-600'
+      : 'border-transparent text-gray-500 hover:text-gray-700'
+    }`}
+    >
+    🛟 Pemulihan Akun
+    </button>
+    <button
     onClick={() => setActiveTab('employees')}
     className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
       activeTab === 'employees'
@@ -1428,6 +1455,11 @@ function AdminDashboard() {
         </div>
       )}
       </div>
+    )}
+
+    {/* Admin-assisted recovery for Authentication accounts without profiles */}
+    {activeTab === 'recovery' && (
+      <IncompleteRegistrations onQueued={handleRecoveryQueued} />
     )}
 
     {/* Employee Management Tab */}

@@ -165,8 +165,7 @@ service cloud.firestore {
                      (request.auth.uid == userId || isAdmin());
 
       allow create: if isSignedIn() &&
-                       request.auth.uid == userId &&
-                       isValidUserCreate(userId);
+                       ((request.auth.uid == userId && isValidUserCreate(userId)) || isAdmin());
 
       allow update: if isSignedIn() &&
                        ((request.auth.uid == userId && isValidSelfUserUpdate()) || isAdmin());
@@ -178,6 +177,20 @@ service cloud.firestore {
     match /registrationRequests/{requestId} {
       allow create: if (isSignedIn() && isValidRegistrationCreate()) || isAdmin();
       allow read, update, delete: if isAdmin();
+    }
+
+    // Authentication accounts whose registration profile was never saved.
+    // Administrators manage the queue. The account owner may only remove their
+    // own entry as part of a successful self-service registration recovery.
+    match /incompleteRegistrations/{userId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    // Immutable audit trail for every admin-assisted registration recovery.
+    match /recoveryAuditLogs/{logId} {
+      allow create, read: if isAdmin();
+      allow update, delete: if false;
     }
 
     // Attendance — GPS wajib di server (client bisa dibypass)

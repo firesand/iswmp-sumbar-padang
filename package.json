@@ -13,6 +13,7 @@
     "clean": "rm -rf dist/ node_modules/.vite",
     "clean:all": "rm -rf dist/ node_modules/.vite node_modules/ package-lock.json && npm install",
     "seed": "node scripts/seed-firestore.mjs",
+    "sync:incomplete-registrations": "node scripts/sync-incomplete-registrations.mjs",
     "firebase": "firebase",
     "firebase:login": "firebase login",
     "firebase:deploy:rules": "firebase deploy --only firestore:rules,storage,firestore:indexes",

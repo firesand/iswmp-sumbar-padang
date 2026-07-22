@@ -240,6 +240,11 @@ function Register() {
       const registrationBatch = writeBatch(db);
       registrationBatch.set(doc(db, 'users', user.uid), userData);
       registrationBatch.set(doc(db, 'registrationRequests', user.uid), registrationData);
+      if (recoveringIncompleteRegistration) {
+        // The account may already be listed in the admin recovery queue. Remove
+        // only its own queue entry after the participant completes registration.
+        registrationBatch.delete(doc(db, 'incompleteRegistrations', user.uid));
+      }
       await registrationBatch.commit();
       console.log('✅ User document and registration request created');
 
