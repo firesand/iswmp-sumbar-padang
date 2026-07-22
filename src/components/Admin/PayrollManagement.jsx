@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { hasAdminAccess } from '../../utils/authorization';
 import {
   getPendingPayrollRequests,
   approvePayrollRequest,
@@ -34,7 +35,7 @@ function PayrollManagement() {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
-          if (data.role !== 'admin') {
+          if (!hasAdminAccess(data)) {
             alert('Access denied. Admin privileges required.');
             return;
           }
@@ -505,4 +506,4 @@ function PayrollManagement() {
   );
 }
 
-export default PayrollManagement; 
+export default PayrollManagement;

@@ -28,6 +28,7 @@ import PayrollManagement from './components/Admin/PayrollManagement';
 import Footer from './components/Common/Footer';
 import AppUpdateNotification from './components/Common/AppUpdateNotification';
 import CacheClearedToast from './components/Common/CacheClearedToast';
+import { hasAdminAccess } from './utils/authorization';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -150,7 +151,7 @@ function App() {
       return <Navigate to="/login" replace />;
     }
 
-    if (requireAdmin && userData.role !== 'admin') {
+    if (requireAdmin && !hasAdminAccess(userData)) {
       console.log('ProtectedRoute - User is not admin, redirecting to employee');
       return <Navigate to="/employee" replace />;
     }
@@ -201,7 +202,7 @@ function App() {
     }
 
     // Redirect based on role for active users
-    if (userData.role === 'admin') {
+    if (hasAdminAccess(userData)) {
       console.log('Redirecting to admin dashboard');
       return <Navigate to="/admin" replace />;
     } else {

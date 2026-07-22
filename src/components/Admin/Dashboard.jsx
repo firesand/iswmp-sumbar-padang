@@ -35,6 +35,7 @@ import DeleteEmployeeModal from './DeleteEmployeeModal';
 import DailyReminderPanel from './DailyReminderPanel';
 import IncompleteRegistrations from './IncompleteRegistrations';
 import { ADMIN_CONFIG, validateAdminConfig } from '../../config/adminConfig';
+import { hasAdminAccess } from '../../utils/authorization';
 
 const getRegistrationTime = (registration) => {
   const timestamp = registration.requestedAt || registration.registeredAt || registration.createdAt;
@@ -134,7 +135,7 @@ function AdminDashboard() {
           if (userDoc.exists()) {
             const data = userDoc.data();
             console.log('User data retrieved:', data);
-            if (data.role !== 'admin') {
+            if (!hasAdminAccess(data)) {
               console.log('User is not admin, redirecting');
               alert('Access denied. Admin privileges required.');
               navigate('/');
