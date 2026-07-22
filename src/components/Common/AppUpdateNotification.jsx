@@ -4,7 +4,7 @@ import { db } from '../../config/firebase';
 import toast, { Toaster } from 'react-hot-toast';
 
 // App version - update this when deploying new version
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.3';
 
 function AppUpdateNotification({ userId, userRole }) {
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -36,10 +36,15 @@ function AppUpdateNotification({ userId, userRole }) {
   // Register service worker
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then((registration) => {
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+        .then(async (registration) => {
           console.log('Service Worker registered:', registration);
           serviceWorkerRef.current = registration;
+
+          // Do not wait for the browser's periodic service-worker check. This
+          // deployment repairs registration, so stale clients need the newest
+          // worker as soon as the app is opened.
+          await registration.update();
           
           // Listen for service worker updates
           registration.addEventListener('updatefound', () => {
@@ -253,16 +258,27 @@ function AppUpdateNotification({ userId, userRole }) {
         });
       }
 
-      // Clear service worker cache if available
-      if (serviceWorkerRef.current) {
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (registration && registration.waiting) {
-          registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      // Remove every old application cache before loading the new bundle.
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+      }
+
+      if ('serviceWorker' in navigator) {
+        const registration = serviceWorkerRef.current
+          || await navigator.serviceWorker.getRegistration();
+        if (registration) {
+          await registration.update();
+          if (registration.waiting) {
+            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
         }
       }
 
-      // Reload the app
-      window.location.reload();
+      // A versioned URL also bypasses any stale browser HTTP cache entry.
+      const refreshUrl = new URL(window.location.href);
+      refreshUrl.searchParams.set('appVersion', updateInfo?.latest || APP_VERSION);
+      window.location.replace(refreshUrl.toString());
     } catch (error) {
       console.error('Update failed:', error);
       toast.error('Update failed. Please refresh manually.');
@@ -374,4 +390,4 @@ function AppUpdateNotification({ userId, userRole }) {
   );
 }
 
-export default AppUpdateNotification; 
+export default AppUpdateNotification;

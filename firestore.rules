@@ -198,7 +198,9 @@ service cloud.firestore {
 
     // App configuration (legacy)
     match /appConfig/{configId} {
-      allow read: if isSignedIn();
+      // The public registration page must be able to detect mandatory client
+      // updates. Other application configuration remains login-only.
+      allow read: if configId == 'version' || isSignedIn();
       allow write: if isAdmin();
     }
 

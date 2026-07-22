@@ -1,7 +1,7 @@
-// Service Worker for Surya Abadi Connecteam
-// Version: 1.0.2 - Mobile/PWA Fix Update
+// Service Worker for ISWMP Padang
+// Version: 1.0.3 - Registration approval and cache recovery
 
-const CACHE_NAME = 'surya-abadi-v1.0.2';
+const CACHE_NAME = 'iswmp-padang-v1.0.3';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -11,7 +11,7 @@ const urlsToCache = [
 ];
 
 // Add version control
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.3';
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {
@@ -37,7 +37,10 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.filter((cacheName) => {
           // Delete old caches that don't match current version
-          return cacheName.startsWith('surya-abadi-') && cacheName !== CACHE_NAME;
+          return (
+            cacheName.startsWith('surya-abadi-')
+            || cacheName.startsWith('iswmp-padang-')
+          ) && cacheName !== CACHE_NAME;
         }).map((cacheName) => {
           console.log('Deleting old cache:', cacheName);
           return caches.delete(cacheName);
@@ -73,10 +76,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // For navigation requests, always fetch from network
+  // For navigation requests, bypass the browser HTTP cache as well as the
+  // service-worker cache. This prevents old index.html files from continuing
+  // to load a registration bundle that predates the Firestore fix.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => {
+      fetch(request, { cache: 'no-store' }).catch(() => {
         return caches.match('/index.html');
       })
     );
