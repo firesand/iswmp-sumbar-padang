@@ -81,6 +81,7 @@ function IncompleteRegistrations({ onQueued }) {
   }, [accounts, search]);
 
   const openRecoveryForm = (account) => {
+    if (account.disabled === true) return;
     setSelectedAccount(account);
     setFormData({
       ...EMPTY_FORM,
@@ -210,7 +211,7 @@ function IncompleteRegistrations({ onQueued }) {
       const auditRef = doc(
         db,
         'recoveryAuditLogs',
-        `${userId}_${Date.now()}`
+        userId
       );
 
       await runTransaction(db, async transaction => {
@@ -325,10 +326,20 @@ function IncompleteRegistrations({ onQueued }) {
               <button
                 type="button"
                 onClick={() => openRecoveryForm(account)}
-                className="mt-4 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                disabled={account.disabled === true}
+                className={`mt-4 w-full rounded-lg px-3 py-2 text-sm font-medium text-white ${
+                  account.disabled === true
+                    ? 'cursor-not-allowed bg-gray-400'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                Lengkapi Data
+                {account.disabled === true ? 'Akun Auth Nonaktif' : 'Lengkapi Data'}
               </button>
+              {account.disabled === true && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Aktifkan akun melalui workflow tepercaya sebelum pemulihan dilanjutkan.
+                </p>
+              )}
             </div>
           ))}
         </div>

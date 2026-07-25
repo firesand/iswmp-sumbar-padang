@@ -1,7 +1,7 @@
 // src/components/Employee/EmployeeProfile.jsx
 import { useState, useEffect } from 'react';
 import { auth, db } from '../../config/firebase';
-import { doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { FEATURES } from '../../config/projectConfig';
 
 function EmployeeProfile() {
@@ -70,7 +70,7 @@ function EmployeeProfile() {
 
       await updateDoc(doc(db, 'users', user.uid), {
         ...formData,
-        updatedAt: Timestamp.now()
+        updatedAt: serverTimestamp()
       });
 
       setUserData(prev => ({ ...prev, ...formData }));
@@ -356,4 +356,4 @@ function EmployeeProfile() {
   );
 }
 
-export default EmployeeProfile; 
+export default EmployeeProfile;

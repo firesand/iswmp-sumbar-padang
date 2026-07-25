@@ -3,6 +3,11 @@
 
 import { PROJECT, getAppUrl, getAdminUrl } from './projectConfig';
 
+// Canonical Firebase Auth account that receives private operational notices.
+// Use the UID rather than role/email so project admins do not inherit them.
+export const PRIVATE_ATTENDANCE_NOTICE_ADMIN_UID =
+  'TJBS6DIyhcbcGxOtoxdCXLQeFYq1';
+
 export const ADMIN_CONFIG = {
   // ⚠️ UPDATE nomor/email kontak admin proyek bila berubah
   phone: '08118062231',

@@ -373,6 +373,9 @@ function DailyReminderPanel() {
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             rows="3"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Jika diisi, pesan ini menggantikan template bawaan. Gunakan {'{name}'} untuk menyapa nama karyawan.
+          </p>
         </div>
 
         {/* Action Buttons */}

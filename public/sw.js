@@ -1,7 +1,7 @@
 // Service Worker for ISWMP Padang
-// Version: 1.0.3 - Registration approval and cache recovery
+// Version: 1.0.3-security2 - attendance integrity and strict CSP rollout
 
-const CACHE_NAME = 'iswmp-padang-v1.0.3';
+const CACHE_NAME = 'iswmp-padang-v1.0.3-security2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -11,7 +11,7 @@ const urlsToCache = [
 ];
 
 // Add version control
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.3-security2';
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {
@@ -24,7 +24,6 @@ self.addEventListener('install', (event) => {
       })
       .then(() => {
         console.log('Service Worker installed');
-        return self.skipWaiting();
       })
   );
 });
@@ -66,13 +65,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  
-  // Skip caching for API calls and authentication
-  if (url.pathname.includes('/api/') ||
-      url.pathname.includes('firestore.googleapis.com') ||
-      url.pathname.includes('identitytoolkit.googleapis.com') ||
-      url.pathname.includes('securetoken.googleapis.com')) {
-    event.respondWith(fetch(request));
+
+  // Never proxy, fabricate, or cache cross-origin Firebase/App Check traffic,
+  // authenticated writes, or any non-GET request.
+  if (request.method !== 'GET' || url.origin !== self.location.origin ||
+      url.pathname.startsWith('/api/')) {
     return;
   }
   
@@ -111,21 +108,8 @@ self.addEventListener('fetch', (event) => {
           
           return response;
         }).catch((error) => {
-          // Handle CSP violations and other network errors
           console.warn('Service Worker fetch failed:', error);
-          
-          // For Firebase Storage requests that fail due to CSP, return a mock response
-          if (request.url.includes('firebasestorage.googleapis.com')) {
-            console.log('Firebase Storage request blocked by CSP, returning mock response');
-            return new Response(JSON.stringify({ error: 'CSP_BLOCKED' }), {
-              status: 403,
-              statusText: 'Forbidden',
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            });
-          }
-          
+
           // For other requests, return offline fallback
           if (request.destination === 'document') {
             return caches.match('/index.html');
@@ -140,19 +124,7 @@ self.addEventListener('fetch', (event) => {
       })
       .catch((error) => {
         console.warn('Service Worker cache match failed:', error);
-        
-        // Handle CSP violations for Firebase Storage
-        if (request.url.includes('firebasestorage.googleapis.com')) {
-          console.log('Firebase Storage request blocked by CSP in cache match');
-          return new Response(JSON.stringify({ error: 'CSP_BLOCKED' }), {
-            status: 403,
-            statusText: 'Forbidden',
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          });
-        }
-        
+
         // Offline fallback
         if (request.destination === 'document') {
           return caches.match('/index.html');

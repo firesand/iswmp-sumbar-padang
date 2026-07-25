@@ -1,10 +1,38 @@
-import { useState, useEffect, useRef } from 'react';
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../../services/firebase';
-import { addAttendance, getTodayAttendance } from '../../services/database';
-import { uploadAttendancePhoto } from '../../services/storage';
-import { validateLocationForUser, getGeofenceLabel } from '../../services/geofenceService';
-import { isValidGpsCoords } from '../../utils/geolocation';
+import {
+  formatAttendanceShiftDuration,
+  getEmployeeAttendanceState,
+  resolveEmployeeAttendanceState,
+} from '../../services/database';
+import { validateLocationForUser } from '../../services/geofenceService';
+import {
+  isValidGpsCoords,
+  validateLocationAgainstAllowedLocations,
+  validateLocationAgainstGeofence,
+} from '../../utils/geolocation';
+import {
+  ATTENDANCE_TIMEZONE,
+  formatWibDate,
+  formatWibTime,
+} from '../../utils/attendanceTime';
+import {
+  createAttendanceChallenge,
+  getAttendanceErrorMessage,
+  submitAttendance,
+  uploadAttendanceProof,
+  VERIFICATION_MODE_LOCATION_PHOTO,
+} from '../../services/attendanceService';
+import { compressAttendancePhoto } from '../../utils/compressAttendancePhoto';
+import { isVerifiedAttendance } from '../../utils/attendanceIntegrity';
+import { resolveAttendanceCompletion } from '../../utils/attendanceCorrection';
 import { PROJECT } from '../../config/projectConfig';
 
 const CheckIn = () => {
@@ -17,13 +45,37 @@ const CheckIn = () => {
   const [photoError, setPhotoError] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [todayAttendance, setTodayAttendance] = useState(null);
+  const [attendanceCandidates, setAttendanceCandidates] = useState([]);
+  const [attendanceStateReady, setAttendanceStateReady] = useState(false);
+  const [attendanceLoadError, setAttendanceLoadError] = useState('');
+  const [
+    maximumShiftDurationMinutes,
+    setMaximumShiftDurationMinutes,
+  ] = useState(null);
+  const [maximumShiftDurationMs, setMaximumShiftDurationMs] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [attendanceChallenge, setAttendanceChallenge] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [presenceCode, setPresenceCode] = useState('');
   
   // Camera refs
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+
+  const checkEmployeeAttendance = useCallback(async () => {
+    if (user) {
+      setAttendanceStateReady(false);
+      const attendanceState = await getEmployeeAttendanceState(user.uid);
+      setAttendanceCandidates(attendanceState.records);
+      setAttendanceLoadError(attendanceState.loadError || '');
+      setMaximumShiftDurationMinutes(
+        attendanceState.maximumShiftDurationMinutes
+      );
+      setMaximumShiftDurationMs(attendanceState.maximumShiftDurationMs);
+      setAttendanceStateReady(true);
+    }
+  }, [user]);
   
   useEffect(() => {
     // Get current user from auth
@@ -51,26 +103,112 @@ const CheckIn = () => {
 
   useEffect(() => {
     if (user) {
-      checkTodayAttendance();
+      checkEmployeeAttendance();
     }
-  }, [user]);
+  }, [user, checkEmployeeAttendance]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   
-  const checkTodayAttendance = async () => {
-    if (user) {
-      const attendance = await getTodayAttendance(user.uid);
-      setTodayAttendance(attendance);
-    }
-  };
+  const employeeAttendanceState = useMemo(
+    () => resolveEmployeeAttendanceState(
+      attendanceCandidates,
+      currentTime,
+      user?.uid || '',
+      maximumShiftDurationMs ?? 0
+    ),
+    [
+      attendanceCandidates,
+      currentTime,
+      maximumShiftDurationMs,
+      user?.uid,
+    ]
+  );
+  const {
+    today,
+    todayAttendance,
+    activeAttendance,
+    expiredOpenAttendance,
+  } = employeeAttendanceState;
+  const activeShiftIsOvernight = Boolean(
+    activeAttendance && activeAttendance.date !== today
+  );
+  const maximumShiftDurationLabel = formatAttendanceShiftDuration(
+    maximumShiftDurationMinutes
+  );
+  const todayAttendanceCompletion =
+    resolveAttendanceCompletion(todayAttendance);
+  const canStartCheckIn = Boolean(
+    attendanceStateReady &&
+    !attendanceLoadError &&
+    !activeAttendance &&
+    !expiredOpenAttendance &&
+    !todayAttendance
+  );
 
   // Initialize camera
   const startCamera = async () => {
     try {
       setPhotoError(null);
+      setError('');
+      setPhoto(null);
+      setPresenceCode('');
+
+      if (!attendanceStateReady || attendanceLoadError) {
+        setError(
+          attendanceLoadError ||
+            'Status shift masih dimuat. Tunggu sebentar lalu coba lagi.'
+        );
+        return;
+      }
+      if (activeAttendance) {
+        setError(
+          'Masih ada shift aktif. Selesaikan check-out melalui dashboard karyawan.'
+        );
+        return;
+      }
+      if (expiredOpenAttendance) {
+        setError(
+          `Shift terbuka sudah melewati ${maximumShiftDurationLabel}. ` +
+          'Hubungi admin sebelum membuat shift baru.'
+        );
+        return;
+      }
+      if (todayAttendance) {
+        setError('Catatan absensi hari ini sudah tersedia.');
+        return;
+      }
+
+      const challenge = await createAttendanceChallenge('checkIn');
+      let initialValidation;
+      if (challenge.verificationMode === VERIFICATION_MODE_LOCATION_PHOTO) {
+        initialValidation = await validateLocationAgainstAllowedLocations(
+          challenge.allowedLocations,
+        );
+      } else {
+        initialValidation = await validateLocationForUser(userData);
+        if (initialValidation.isValid) {
+          initialValidation = await validateLocationAgainstGeofence({
+            ...challenge.geofence,
+            nama: challenge.geofence?.name,
+            isActive: true,
+          });
+        }
+      }
+      if (!initialValidation.isValid) {
+        setError(initialValidation.message || 'Lokasi penugasan tidak valid.');
+        return;
+      }
+      setAttendanceChallenge(challenge);
+      setLocation(initialValidation.location);
+      setShowCamera(true);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       
       // Check if camera is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setPhotoError("Camera tidak didukung di browser ini");
-        return;
+        throw new Error('Camera tidak didukung di browser ini.');
       }
       
       // Request camera permission
@@ -86,21 +224,30 @@ const CheckIn = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
-      setShowCamera(true);
     } catch (error) {
       console.error('Error accessing camera:', error);
-      setPhotoError("Camera tidak dapat diakses. Silakan pilih dari galeri atau skip foto.");
+      setShowCamera(false);
+      setAttendanceChallenge(null);
+      setPhotoError(
+        getAttendanceErrorMessage(error) ||
+          'Camera tidak dapat diakses. Aktifkan izin kamera lalu coba lagi.'
+      );
     }
   };
 
   // Stop camera
-  const stopCamera = () => {
+  const stopCamera = (preserveChallenge = false) => {
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
     }
     setShowCamera(false);
     setPhotoError(null);
+    if (!preserveChallenge) {
+      setAttendanceChallenge(null);
+      setPhoto(null);
+      setPresenceCode('');
+    }
   };
 
   // Capture photo
@@ -123,7 +270,7 @@ const CheckIn = () => {
       const file = new File([blob], "selfie.jpg", { type: "image/jpeg" });
       
       setPhoto(file);
-      stopCamera();
+      stopCamera(true);
     } catch (error) {
       console.error('Error capturing photo:', error);
       setPhotoError('Failed to capture photo. Please try again.');
@@ -132,109 +279,129 @@ const CheckIn = () => {
     }
   };
 
-  const handleGallerySelect = () => {
-    setPhotoError(null);
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.multiple = false;
-    
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        if (file.size > 5 * 1024 * 1024) {
-          setPhotoError("Ukuran foto maksimal 5MB");
-          return;
-        }
-        setPhoto(file);
-      }
-    };
-    
-    input.click();
-  };
-
-  const handleSkipPhoto = () => {
-    setPhoto(null);
-    setPhotoError(null);
-  };
-  
   const handleCheckIn = async () => {
     setLoading(true);
     setError('');
     setSuccess('');
-    
+
     try {
-      // Check if already checked in today
-      if (todayAttendance) {
-        setError('Anda sudah melakukan check in hari ini!');
+      if (!attendanceStateReady || attendanceLoadError) {
+        setError(
+          attendanceLoadError ||
+            'Status shift masih dimuat. Tunggu sebentar lalu coba lagi.'
+        );
         setLoading(false);
         return;
       }
-      
-      // Validate location
-      const locationValidation = await validateLocationForUser(userData);
-      
+      if (activeAttendance) {
+        setError(
+          'Masih ada shift aktif. Selesaikan check-out melalui dashboard karyawan.'
+        );
+        setLoading(false);
+        return;
+      }
+      if (expiredOpenAttendance) {
+        setError(
+          `Shift terbuka sudah melewati ${maximumShiftDurationLabel}. ` +
+          'Hubungi admin sebelum membuat shift baru.'
+        );
+        setLoading(false);
+        return;
+      }
+      if (todayAttendance) {
+        setError('Catatan absensi hari ini sudah tersedia.');
+        setLoading(false);
+        return;
+      }
+
+      // Foto selfie wajib — tidak ada opsi skip/galeri
+      if (!photo) {
+        setError('Foto selfie wajib untuk check in. Ambil foto dengan kamera terlebih dahulu.');
+        setLoading(false);
+        return;
+      }
+
+      if (!attendanceChallenge) {
+        setError('Tantangan absensi tidak tersedia. Ambil selfie ulang.');
+        setLoading(false);
+        return;
+      }
+      if (
+        attendanceChallenge.presenceProofRequired === true &&
+        !/^\d{6}$/.test(presenceCode.trim())
+      ) {
+        setError('Kode kehadiran lokasi wajib diisi dengan tepat 6 digit.');
+        setLoading(false);
+        return;
+      }
+
+      // Validasi ulang memakai lokasi canonical dari challenge backend.
+      const locationValidation =
+        attendanceChallenge.verificationMode === VERIFICATION_MODE_LOCATION_PHOTO
+          ? await validateLocationAgainstAllowedLocations(
+            attendanceChallenge.allowedLocations,
+          )
+          : await validateLocationAgainstGeofence({
+            ...attendanceChallenge.geofence,
+            nama: attendanceChallenge.geofence?.name,
+            isActive: true,
+          });
+
       if (!locationValidation.isValid || !isValidGpsCoords(locationValidation.location)) {
         setError(locationValidation.message || 'GPS wajib aktif untuk absensi.');
         setLoading(false);
         return;
       }
-      
-      setLocation(locationValidation.location);
-      
-      // Upload photo if provided
-      let photoUrl = '';
-      if (photo) {
-        try {
-          const today = new Date().toISOString().split('T')[0];
-          photoUrl = await uploadAttendancePhoto(photo, user.uid, today);
-        } catch (error) {
-          console.error('Error uploading photo:', error);
-          // Continue without photo if upload fails
-        }
-      }
-      
-      // Determine status based on time
-      const now = new Date();
-      const isLate = now.getHours() >= 9; // After 9 AM is late
 
-      // Save attendance (service layer enforces one-per-day, but add client guard)
-      if (todayAttendance) {
-        setError('Anda sudah melakukan check in hari ini!');
+      setLocation(locationValidation.location);
+
+      // Upload hanya ke path challenge, lalu backend menghitung seluruh field.
+      try {
+        const compressed = await compressAttendancePhoto(photo, {
+          mimeType: 'image/jpeg',
+        });
+        await uploadAttendanceProof(compressed, attendanceChallenge);
+        const finalLocationValidation =
+          attendanceChallenge.verificationMode === VERIFICATION_MODE_LOCATION_PHOTO
+            ? await validateLocationAgainstAllowedLocations(
+              attendanceChallenge.allowedLocations,
+            )
+            : await validateLocationAgainstGeofence({
+              ...attendanceChallenge.geofence,
+              nama: attendanceChallenge.geofence?.name,
+              isActive: true,
+            });
+        if (
+          !finalLocationValidation.isValid ||
+          !isValidGpsCoords(finalLocationValidation.location)
+        ) {
+          throw new Error(
+            finalLocationValidation.message || 'GPS final tidak valid.'
+          );
+        }
+        setLocation(finalLocationValidation.location);
+        await submitAttendance(
+          attendanceChallenge,
+          finalLocationValidation.location,
+          presenceCode
+        );
+      } catch (uploadError) {
+        console.error('Error submitting attendance:', uploadError);
+        setError(getAttendanceErrorMessage(uploadError));
+        // Status upload dapat ambigu saat jaringan putus. Karena path bersifat
+        // create-only, selalu mulai ulang dengan challenge baru.
+        setPhoto(null);
+        setAttendanceChallenge(null);
+        setPresenceCode('');
         setLoading(false);
         return;
       }
 
-      const attendanceData = {
-        userId: user.uid,
-        userName: userData?.name || user.displayName,
-        date: new Date().toISOString().split('T')[0],
-        checkIn: new Date(),
-        checkInLocation: {
-          lat: locationValidation.location.lat,
-          lng: locationValidation.location.lng,
-          accuracy: locationValidation.location.accuracy ?? null,
-          source: locationValidation.location.source || null,
-          capturedAt: locationValidation.location.capturedAt || Date.now(),
-        },
-        checkInPhoto: photoUrl,
-        status: isLate ? 'late' : 'ontime',
-        geofenceId: locationValidation.geofence?.id || null,
-        geofenceName: getGeofenceLabel(locationValidation.geofence),
-        transitionMode: locationValidation.transitionMode || false,
-        locationSource: locationValidation.source || null,
-        locationAccuracy: locationValidation.accuracy ?? null,
-        distanceFromGeofence: locationValidation.distance ?? null,
-      };
-      
-      const result = await addAttendance(attendanceData);
-      
-      if (result.success) {
-        setSuccess('Check in berhasil!');
-        checkTodayAttendance(); // Refresh today's attendance
-      } else {
-        setError('Check in gagal: ' + result.message);
-      }
+      setSuccess('Check in berhasil!');
+      setPhoto(null);
+      setAttendanceChallenge(null);
+      setPresenceCode('');
+      await checkEmployeeAttendance();
       
     } catch (error) {
       console.error('Check in error:', error);
@@ -243,8 +410,6 @@ const CheckIn = () => {
       setLoading(false);
     }
   };
-  
-  const currentTime = new Date();
   
   return (
     <div className="max-w-md mx-auto p-4">
@@ -257,25 +422,97 @@ const CheckIn = () => {
         {/* Current time display */}
         <div className="text-center mb-6 p-4 bg-blue-50 rounded-lg">
           <div className="text-3xl font-bold text-blue-600">
-            {currentTime.toLocaleTimeString('id-ID')}
+            {currentTime.toLocaleTimeString('id-ID', {
+              timeZone: ATTENDANCE_TIMEZONE,
+            })}
           </div>
           <div className="text-gray-600 mt-1">
-            {currentTime.toLocaleDateString('id-ID', { 
+            {formatWibDate(currentTime, {
               weekday: 'long', 
               year: 'numeric', 
               month: 'long', 
               day: 'numeric' 
-            })}
+            })} WIB
           </div>
         </div>
         
         {/* Status display */}
-        {todayAttendance ? (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+        {!attendanceStateReady ? (
+          <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-center text-gray-700">
+            Memuat status shift…
+          </div>
+        ) : attendanceLoadError ? (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-center text-red-800">
+            <div className="font-semibold">Status shift tidak dapat diverifikasi</div>
+            <div className="mt-1 text-sm">{attendanceLoadError}</div>
+          </div>
+        ) : activeAttendance ? (
+          <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
             <div className="text-center">
-              <div className="text-green-600 font-semibold">✓ Sudah Check In</div>
-              <div className="text-sm text-green-600 mt-1">
-                {todayAttendance.checkIn && new Date(todayAttendance.checkIn.seconds * 1000).toLocaleTimeString('id-ID')}
+              <div className="font-semibold text-blue-700">
+                {activeShiftIsOvernight
+                  ? 'Shift kemarin masih aktif'
+                  : 'Shift hari ini masih aktif'}
+              </div>
+              <div className="mt-1 text-sm text-blue-700">
+                Tanggal shift:{' '}
+                {formatWibDate(activeAttendance.date, {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}; check-in {formatWibTime(activeAttendance.checkIn)} WIB
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/employee')}
+                className="mt-3 w-full rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700"
+              >
+                Lanjutkan Check Out di Dashboard
+              </button>
+            </div>
+          </div>
+        ) : expiredOpenAttendance ? (
+          <div className="mb-6 rounded-lg border border-orange-200 bg-orange-50 p-4 text-center text-orange-900">
+            <div className="font-semibold">
+              Shift terbuka melewati {maximumShiftDurationLabel}
+            </div>
+            <div className="mt-1 text-sm">
+              Check-in baru dan checkout otomatis dinonaktifkan. Hubungi admin.
+            </div>
+          </div>
+        ) : todayAttendance ? (
+          <div className={`mb-6 rounded-lg border p-4 ${
+            isVerifiedAttendance(todayAttendance)
+              ? 'border-green-200 bg-green-50'
+              : 'border-red-200 bg-red-50'
+          }`}>
+            <div className="text-center">
+              <div className={`font-semibold ${
+                isVerifiedAttendance(todayAttendance)
+                  ? 'text-green-700'
+                  : 'text-red-700'
+              }`}>
+                {isVerifiedAttendance(todayAttendance)
+                  ? todayAttendanceCompletion.isComplete
+                    ? 'Absensi hari ini selesai'
+                    : 'Shift hari ini sudah dimulai'
+                  : 'Catatan hari ini belum terverifikasi'}
+              </div>
+              {todayAttendanceCompletion.manualCorrection && (
+                <div className="mt-2 text-xs font-medium text-orange-800">
+                  Selesai melalui koreksi administratif; bukan checkout GPS/selfie
+                  terverifikasi.
+                </div>
+              )}
+              <div className="mt-1 text-sm text-gray-600">
+                {todayAttendance.checkIn
+                  ? `${formatWibDate(todayAttendance.checkIn, {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}, ${formatWibTime(todayAttendance.checkIn)} WIB`
+                  : 'Tidak ada check-in terverifikasi.'}
               </div>
             </div>
           </div>
@@ -319,12 +556,12 @@ const CheckIn = () => {
         )}
         
         {/* Photo upload */}
-        {!todayAttendance && (
+        {canStartCheckIn && (
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Foto Selfie (Optional)
+              Foto Selfie (Wajib)
             </label>
-            
+
             <div className="space-y-2">
               <button
                 type="button"
@@ -333,22 +570,8 @@ const CheckIn = () => {
               >
                 📷 Buka Camera
               </button>
-              <button
-                type="button"
-                onClick={handleGallerySelect}
-                className="w-full py-3 px-4 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                🖼️ Pilih dari Galeri
-              </button>
-              <button
-                type="button"
-                onClick={handleSkipPhoto}
-                className="w-full py-2 px-4 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-sm"
-              >
-                ⏭️ Skip Foto (Check-in tanpa foto)
-              </button>
             </div>
-            
+
             {photo && (
               <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-sm text-green-700">
@@ -356,24 +579,53 @@ const CheckIn = () => {
                 </p>
               </div>
             )}
-            
+
             {photoError && (
               <p className="text-xs text-red-500 mt-1">
                 {photoError}
               </p>
             )}
-            
+
             <p className="text-xs text-gray-500 mt-2">
-              📱 Jika camera bermasalah, pilih dari galeri atau skip foto
+              📱 Foto selfie wajib diambil langsung dari kamera untuk check in
             </p>
           </div>
         )}
+
+        {canStartCheckIn &&
+          attendanceChallenge?.presenceProofRequired === true && (
+            <div className="mb-6">
+              <label htmlFor="checkin-presence-code" className="block text-sm font-medium text-gray-700 mb-2">
+                Kode kehadiran lokasi (6 digit)
+              </label>
+              <input
+                id="checkin-presence-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={presenceCode}
+                onChange={(event) =>
+                  setPresenceCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                }
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-xl tracking-[0.35em]"
+                placeholder="000000"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Minta kode aktif kepada petugas di lokasi.
+              </p>
+            </div>
+          )}
         
         {/* Check in button */}
-        {!todayAttendance && (
+        {canStartCheckIn && (
           <button
             onClick={handleCheckIn}
-            disabled={loading}
+            disabled={
+              loading ||
+              (attendanceChallenge?.presenceProofRequired === true &&
+                !/^\d{6}$/.test(presenceCode))
+            }
             className={`w-full py-4 px-6 rounded-lg font-bold text-white text-lg transition-colors ${
               loading 
                 ? 'bg-gray-400 cursor-not-allowed' 
@@ -413,9 +665,24 @@ const CheckIn = () => {
             </div>
 
             {location && (
-              <div className="mb-4 p-3 bg-green-50 rounded-lg">
-                <p className="text-sm text-green-800">
-                  ✓ Location verified (within 1500m of office)
+              <div className={`mb-4 p-3 rounded-lg ${
+                attendanceChallenge?.verificationMode ===
+                VERIFICATION_MODE_LOCATION_PHOTO
+                  ? 'bg-amber-50'
+                  : 'bg-green-50'
+              }`}>
+                <p className={`text-sm ${
+                  attendanceChallenge?.verificationMode ===
+                  VERIFICATION_MODE_LOCATION_PHOTO
+                    ? 'text-amber-900'
+                    : 'text-green-800'
+                }`}>
+                  {attendanceChallenge?.verificationMode ===
+                  VERIFICATION_MODE_LOCATION_PHOTO
+                    ? 'Mode operasional sementara — GPS + foto. Backend memverifikasi lokasi operasional saat submit.'
+                    : `✓ Lokasi awal diterima. Backend akan memverifikasi batas ${
+                      attendanceChallenge?.geofence?.radius || 'yang dikonfigurasi'
+                    } meter saat submit.`}
                 </p>
               </div>
             )}
@@ -442,7 +709,7 @@ const CheckIn = () => {
                 )}
               </button>
               <button
-                onClick={stopCamera}
+                onClick={() => stopCamera()}
                 disabled={isProcessing}
                 className="px-6 py-3 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
@@ -456,4 +723,4 @@ const CheckIn = () => {
   );
 };
 
-export default CheckIn; 
+export default CheckIn;

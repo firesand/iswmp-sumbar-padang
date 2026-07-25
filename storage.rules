@@ -1,51 +1,110 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return firestore.get(
+        /databases/(default)/documents/users/$(request.auth.uid)
+      );
+    }
+
+    function isActiveUser() {
+      return isSignedIn()
+        && userDoc().data.accountStatus == 'active'
+        && userDoc().data.isActive == true
+        && (!userDoc().data.keys().hasAny(['mustChangePassword'])
+            || userDoc().data.mustChangePassword == false);
+    }
+
+    function isActiveAdmin() {
+      return isActiveUser()
+        && (userDoc().data.role == 'admin' || userDoc().data.isAdmin == true);
+    }
+
+    function isOwnerOrAdmin(userId) {
+      return (isActiveUser() && request.auth.uid == userId) || isActiveAdmin();
+    }
+
     // Profile photos - users can upload their own photos
     match /profiles/{userId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-                       request.auth.uid == userId &&
-                       request.resource.size < 5 * 1024 * 1024 && // 5MB max
-                       request.resource.contentType.matches('image/.*');
+      allow read: if isActiveUser();
+      allow write: if isActiveUser()
+                       && request.auth.uid == userId
+                       && request.resource.size < 5 * 1024 * 1024
+                       && request.resource.contentType.matches('image/.*');
     }
-    
-    // Attendance photos - users can upload their own attendance photos
+
+    // Historical attendance photos are read-only. New proofs must use a
+    // backend-issued, one-time challenge under attendanceProofs/.
     match /attendances/{userId}/{allPaths=**} {
-      allow read: if request.auth != null &&
-                     (request.auth.uid == userId || 
-                      request.auth.token.role == 'admin');
-      allow write: if request.auth != null && 
-                       request.auth.uid == userId &&
-                       request.resource.size < 5 * 1024 * 1024 && // 5MB max
-                       request.resource.contentType.matches('image/.*');
+      allow read: if isOwnerOrAdmin(userId);
+      allow write: if false;
     }
-    
+
+    function attendanceChallenge(challengeId) {
+      return firestore.get(
+        /databases/(default)/documents/attendanceChallenges/$(challengeId)
+      );
+    }
+
+    function isValidAttendanceProof(userId, challengeId) {
+      let challenge = attendanceChallenge(challengeId).data;
+      let expectedPath = 'attendanceProofs/' + userId + '/' + challengeId;
+      return isActiveUser()
+        && request.auth.uid == userId
+        && request.resource.size >= 10 * 1024
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.metadata.keys().hasOnly([
+          'challengeId', 'uid', 'action'
+        ])
+        && request.resource.metadata.keys().hasAll([
+          'challengeId', 'uid', 'action'
+        ])
+        && request.resource.metadata.challengeId == challengeId
+        && request.resource.metadata.uid == userId
+        && request.resource.metadata.action in ['checkIn', 'checkOut']
+        && challenge.uid == userId
+        && challenge.action == request.resource.metadata.action
+        && challenge.status == 'pending'
+        && challenge.photoPath == expectedPath
+        && challenge.expiresAt > request.time
+        && challenge.consumedAt == null
+        && challenge.attendanceId == null;
+    }
+
+    // Exact, extension-free challenge path. Objects are immutable: clients
+    // may create once, but cannot replace, edit metadata, or delete a proof.
+    match /attendanceProofs/{userId}/{challengeId} {
+      allow read: if isOwnerOrAdmin(userId);
+      allow create: if isValidAttendanceProof(userId, challengeId);
+      allow update, delete: if false;
+    }
+
     // Documents - users can upload their own documents
     match /documents/{userId}/{allPaths=**} {
-      allow read: if request.auth != null &&
-                     (request.auth.uid == userId || 
-                      request.auth.token.role == 'admin');
-      allow write: if request.auth != null && 
-                       request.auth.uid == userId &&
-                       request.resource.size < 10 * 1024 * 1024 && // 10MB max
+      allow read: if isOwnerOrAdmin(userId);
+      allow write: if isActiveUser()
+                       && request.auth.uid == userId
+                       && request.resource.size < 10 * 1024 * 1024 && // 10MB max
                        request.resource.contentType.matches('application/pdf|image/.*|application/msword|application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     }
-    
+
     // Public assets - read only for all authenticated users
     match /public/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if isActiveUser();
       allow write: if false; // No write access to public assets
     }
-    
+
     // Admin uploads - only admins can upload to admin folder
     match /admin/{allPaths=**} {
-      allow read: if request.auth != null &&
-                     request.auth.token.role == 'admin';
-      allow write: if request.auth != null &&
-                       request.auth.token.role == 'admin' &&
+      allow read: if isActiveAdmin();
+      allow write: if isActiveAdmin() &&
                        request.resource.size < 10 * 1024 * 1024; // 10MB max
     }
   }
-} 
+}

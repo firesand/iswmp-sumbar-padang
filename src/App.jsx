@@ -13,6 +13,7 @@ import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import RegisterErrorBoundary from './components/Auth/RegisterErrorBoundary';
 import PendingApproval from './components/Auth/PendingApproval';
+import ForcePasswordChange from './components/Auth/ForcePasswordChange';
 import LoadingScreen from './components/Common/LoadingScreen';
 import ErrorBoundary from './components/Common/ErrorBoundary';
 import WhiteScreenFallback from './components/Common/WhiteScreenFallback';
@@ -127,6 +128,12 @@ function App() {
   if (loading) {
     console.log('App.jsx - Initial loading...');
     return <LoadingScreen />;
+  }
+
+  // Password sementara hasil reset admin tidak boleh dipakai untuk mengakses
+  // fitur lain. Perubahan dilakukan oleh callable backend dan mencabut sesi lama.
+  if (user && userData?.mustChangePassword === true) {
+    return <ForcePasswordChange />;
   }
 
   // Protected Route Component

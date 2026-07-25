@@ -7,10 +7,6 @@ import { auth, db, storage } from '../../config/firebase';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentLocation } from '../../utils/geolocation';
 import { checkGeolocationPermission } from '../../utils/geolocationPermissions';
-import { tryMobileNavigation } from '../../utils/mobileWhiteScreenFix.js';
-import { handleProductionNavigation } from '../../utils/productionFix.js';
-import { aggressiveProductionFix } from '../../utils/aggressiveProductionFix.js';
-import { cspErrorHandler } from '../../utils/cspErrorHandler.js';
 import { KELURAHAN_SEED } from '../../data/seedData.js';
 import { FIELD_STAFF_TYPES, OFFICE_STAFF_ROLES } from '../../services/geofenceService.js';
 import { PROJECT } from '../../config/projectConfig.js';
@@ -162,28 +158,15 @@ function Register() {
         console.log('✅ Incomplete registration verified and ready for recovery:', user.uid);
       }
 
-      // Upload photo if provided (with comprehensive CSP error handling)
+      // Upload the optional profile photo. If the user selected a photo, do
+      // not silently continue when upload or authorization fails.
       let photoURL = '';
       if (photo) {
         console.log('📸 Uploading photo...');
-
-        // Use CSP error handler to wrap storage operation
-        const uploadResult = await cspErrorHandler.wrapStorageOperation(
-          async () => {
-            const photoRef = ref(storage, `profiles/${user.uid}/${photo.name}`);
-            const snapshot = await uploadBytes(photoRef, photo);
-            const url = await getDownloadURL(snapshot.ref);
-            console.log('✅ Photo uploaded:', url);
-            return url;
-          },
-          '' // Fallback: empty string (no photo)
-        );
-
-        photoURL = uploadResult || '';
-
-        if (!photoURL) {
-          console.log('⚠️ Photo upload failed or blocked by CSP, continuing without photo');
-        }
+        const photoRef = ref(storage, `profiles/${user.uid}/${photo.name}`);
+        const snapshot = await uploadBytes(photoRef, photo);
+        photoURL = await getDownloadURL(snapshot.ref);
+        console.log('✅ Photo uploaded:', photoURL);
       }
 
       // Update profile
@@ -199,7 +182,7 @@ function Register() {
       const userData = {
         uid: user.uid,
         name: formData.name,
-        email: formData.email,
+        email: user.email || formData.email.trim().toLowerCase(),
         phone: formData.phone,
         phoneNumber: formData.phone,
         nik: formData.nik,
@@ -319,195 +302,15 @@ function Register() {
     }
   };
 
-  // Separate function to handle successful registration with mobile support
+  // Sign out and use a single full navigation so every browser receives the
+  // public post-registration state without cache/storage deletion tricks.
   const handleSuccessfulRegistration = async () => {
-    console.log('🚪 Handling successful registration...');
-
-    // Detect mobile browser
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isAndroid = /Android/.test(navigator.userAgent);
-
-    console.log('📱 Mobile detected:', isMobile);
-    console.log('📱 iOS detected:', isIOS);
-    console.log('📱 Android detected:', isAndroid);
-
     try {
-      // Step 1: Sign out
-      console.log('Step 1: Signing out...');
       await auth.signOut();
-      console.log('✅ Sign out successful');
-
-      // Step 2: Wait a moment (longer for mobile)
-      const waitTime = isMobile ? 1000 : 500;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-
-      // Step 3: Navigate to home page with production and mobile-specific handling
-      console.log('Step 3: Navigating to home page...');
-
-      // Check if we're in production
-      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-      console.log('🌐 Production detected:', isProduction);
-
-      // For production, use AGGRESSIVE production navigation
-      if (isProduction) {
-        console.log('🚀 AGGRESSIVE: Using aggressive production navigation...');
-
-        // Try aggressive production navigation first
-        const aggressiveNavSuccess = aggressiveProductionFix.forceNavigate('/');
-        if (aggressiveNavSuccess) {
-          console.log('✅ Aggressive production navigation successful');
-          return;
-        }
-
-        // Fallback to normal production navigation
-        console.log('🌐 Aggressive navigation failed, trying normal production navigation...');
-        const productionNavSuccess = await handleProductionNavigation('/');
-        if (productionNavSuccess) {
-          console.log('✅ Production navigation successful');
-          return;
-        }
-
-        // Fallback to mobile navigation if production navigation fails
-        if (isMobile) {
-          console.log('📱 Production navigation failed, trying mobile navigation...');
-          const mobileNavSuccess = await tryMobileNavigation('/');
-          if (mobileNavSuccess) {
-            console.log('✅ Mobile navigation successful');
-            return;
-          }
-        }
-
-        // Nuclear option for production
-        console.log('🚀 AGGRESSIVE: All navigation methods failed, applying nuclear reset...');
-        aggressiveProductionFix.nuclearReset();
-        return;
-      }
-
-      // For mobile (non-production), use mobile-specific navigation
-      if (isMobile) {
-        console.log('📱 Using mobile-specific navigation...');
-
-        // MOBILE AGGRESSIVE NAVIGATION - Bypass React Router entirely
-        const mobileNavMethods = [
-          // Method 1: Direct replace (most reliable for mobile)
-          () => {
-            console.log('📱 Method 1: window.location.replace');
-            window.location.replace('/');
-          },
-          // Method 2: Direct href
-          () => {
-            console.log('📱 Method 2: window.location.href');
-            window.location.href = '/';
-          },
-          // Method 3: Direct assign
-          () => {
-            console.log('📱 Method 3: window.location.assign');
-            window.location.assign('/');
-          },
-          // Method 4: iOS-specific reload
-          () => {
-            if (isIOS) {
-              console.log('📱 Method 4: iOS-specific reload');
-              window.location.href = window.location.href;
-            } else {
-              console.log('📱 Method 4: Android reload');
-              window.location.reload();
-            }
-          },
-          // Method 5: Hard reload
-          () => {
-            console.log('📱 Method 5: Hard reload');
-            window.location.reload(true);
-          },
-          // Method 6: History replace
-          () => {
-            console.log('📱 Method 6: History replace');
-            window.history.replaceState({}, '', '/');
-            window.dispatchEvent(new PopStateEvent('popstate'));
-          },
-          // Method 7: History push
-          () => {
-            console.log('📱 Method 7: History push');
-            window.history.pushState({}, '', '/');
-            window.dispatchEvent(new PopStateEvent('popstate'));
-          },
-          // Method 8: React Router (last resort for mobile)
-          () => {
-            console.log('📱 Method 8: React Router');
-            navigate('/');
-          }
-        ];
-
-        // Try each method with delay
-        for (let i = 0; i < mobileNavMethods.length; i++) {
-          try {
-            console.log(`📱 Trying mobile navigation method ${i + 1}...`);
-            await new Promise(resolve => setTimeout(resolve, 300)); // Wait between attempts
-            mobileNavMethods[i]();
-            console.log(`✅ Mobile navigation method ${i + 1} successful`);
-            return;
-          } catch (error) {
-            console.warn(`❌ Mobile navigation method ${i + 1} failed:`, error);
-          }
-        }
-
-        // If all methods fail, force reload
-        console.log('📱 All mobile navigation methods failed, forcing reload...');
-        window.location.reload(true);
-
-      } else {
-        // Desktop navigation (original logic)
-        console.log('🖥️ Using desktop navigation...');
-
-        // Try React Router first
-        try {
-          navigate('/');
-          console.log('✅ React Router navigation to home successful');
-          return;
-        } catch (navError) {
-          console.warn('❌ React Router failed:', navError);
-        }
-
-        // Try window.location
-        try {
-          window.location.href = '/';
-          console.log('✅ Window location navigation to home successful');
-          return;
-        } catch (windowError) {
-          console.warn('❌ Window location failed:', windowError);
-        }
-
-        // Try window.location.replace
-        try {
-          window.location.replace('/');
-          console.log('✅ Window location.replace to home successful');
-          return;
-        } catch (replaceError) {
-          console.warn('❌ Window location.replace failed:', replaceError);
-        }
-
-        // Last resort: reload page
-        console.log('🔄 Using fallback: reload page');
-        window.location.reload();
-      }
-
+      window.location.replace('/');
     } catch (error) {
-      console.error('❌ Registration completion failed:', error);
-
-      // Emergency fallback - go to home page
-      try {
-        if (isMobile) {
-          console.log('📱 Emergency mobile fallback...');
-          window.location.replace('/');
-        } else {
-          console.log('🖥️ Emergency desktop fallback...');
-          window.location.href = '/';
-        }
-      } catch (finalError) {
-        console.error('❌ Final fallback failed:', finalError);
-        window.location.reload();
-      }
+      console.error('Registration sign-out failed:', error);
+      navigate('/', { replace: true });
     }
   };
 
@@ -533,23 +336,10 @@ function Register() {
     setShowRecovery(false);
     setRegistrationStep('form');
 
-    // Clear cache and reload
-    if ('caches' in window) {
-      caches.keys().then(names => {
-        names.forEach(name => caches.delete(name));
-      });
-    }
-
-    // Force reload
-    window.location.reload(true);
   };
 
   const handleGoToLogin = () => {
     navigate('/login');
-  };
-
-  const handleGoHome = () => {
-    window.location.href = '/';
   };
 
   // Show recovery UI if stuck

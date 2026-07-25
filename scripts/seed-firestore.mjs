@@ -1,126 +1,135 @@
 #!/usr/bin/env node
+
 /**
- * Seed Firestore dengan data kelurahan, kantor, dan projectConfig.
+ * Seed Firestore using the current Firebase CLI OAuth session.
  *
- * Prasyarat:
- *   1. Download service account key dari Firebase Console
- *   2. Simpan sebagai service-account.json di root project
- *   3. Jalankan: npm run seed
+ * Dry-run: npm run seed
+ * Apply: npm run seed -- --apply
+ *   --confirm-reset-geofences=RESET_GEOFENCES_TO_PROVISIONAL
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { initializeApp, cert } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import {
   KELURAHAN_SEED,
   KANTOR_SEED,
   PROJECT_CONFIG_SEED,
 } from '../src/data/seedData.js';
+import {
+  createFirebaseCliApi,
+  encodeFirestoreFields,
+} from './lib/firebase-cli-api.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || 'iswmp-sumbar-padang';
+const FIRESTORE_ROOT =
+  `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/` +
+  'databases/(default)/documents';
+const args = process.argv.slice(2);
+const APPLY = args.includes('--apply');
+const confirmation = args.find(value =>
+  value.startsWith('--confirm-reset-geofences='))?.split('=').slice(1).join('=');
 
-const SERVICE_ACCOUNT_PATH =
-  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-  join(__dirname, '..', 'service-account.json');
-
-if (!existsSync(SERVICE_ACCOUNT_PATH)) {
-  console.error(`
-❌ Service account tidak ditemukan: ${SERVICE_ACCOUNT_PATH}
-
-Langkah:
-  1. Buka https://console.firebase.google.com/project/iswmp-sumbar-padang/settings/serviceaccounts/adminsdk
-  2. Generate new private key → simpan sebagai service-account.json
-  3. Jalankan: npm run seed
-`);
-  process.exit(1);
+if (APPLY && confirmation !== 'RESET_GEOFENCES_TO_PROVISIONAL') {
+  throw new Error(
+    'Mode --apply membutuhkan ' +
+    '--confirm-reset-geofences=RESET_GEOFENCES_TO_PROVISIONAL karena seed ' +
+    'menonaktifkan seluruh geofence.'
+  );
 }
 
-const serviceAccount = JSON.parse(readFileSync(SERVICE_ACCOUNT_PATH, 'utf8'));
-
-initializeApp({
-  credential: cert(serviceAccount),
+const api = await createFirebaseCliApi();
+const documentName = (collection, id) =>
+  `projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${id}`;
+const write = (collection, id, data) => ({
+  update: {
+    name: documentName(collection, id),
+    fields: encodeFirestoreFields(data),
+  },
+  updateMask: { fieldPaths: Object.keys(data) },
+  updateTransforms: [
+    { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
+    { fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' },
+  ],
 });
 
-const db = getFirestore();
-const now = FieldValue.serverTimestamp();
-
-async function seed() {
-  console.log('🌱 Seeding ISWMP SumBar-Padang Firestore...\n');
-
-  const batch = db.batch();
-
-  for (const kel of KELURAHAN_SEED) {
-    const ref = db.collection('kelurahan').doc(kel.id);
-    batch.set(ref, {
-      nama: kel.nama,
-      kecamatan: kel.kecamatan,
-      alamat: kel.alamat,
-      kota: kel.kota,
-      provinsi: kel.provinsi,
-      lat: kel.lat,
-      lng: kel.lng,
-      radius: kel.radius,
-      coordinateStatus: kel.coordinateStatus,
-      coordinateSource: kel.coordinateSource,
-      coordinateSourceUrl: kel.coordinateSourceUrl,
-      verifiedAt: kel.verifiedAt,
-      catatan: kel.catatan,
-      // Koordinat web tidak boleh mengaktifkan geofence sebelum verifikasi lapangan.
-      isActive: false,
-      createdAt: now,
-      updatedAt: now,
-    }, { merge: true });
-    console.log(`  ✓ kelurahan/${kel.id} — ${kel.nama}`);
-  }
-
-  const kantorRef = db.collection('kantor').doc(KANTOR_SEED.id);
-  batch.set(kantorRef, {
-    nama: KANTOR_SEED.nama,
-    alamat: KANTOR_SEED.alamat,
-    kota: KANTOR_SEED.kota,
-    provinsi: KANTOR_SEED.provinsi,
-    lat: KANTOR_SEED.lat,
-    lng: KANTOR_SEED.lng,
-    radius: KANTOR_SEED.radius,
-    // Koordinat sudah diisi, tapi tetap nonaktif sampai verifikasi lapangan.
+const writes = [];
+for (const kelurahan of KELURAHAN_SEED) {
+  writes.push(write('kelurahan', kelurahan.id, {
+    nama: kelurahan.nama,
+    kecamatan: kelurahan.kecamatan,
+    alamat: kelurahan.alamat,
+    kota: kelurahan.kota,
+    provinsi: kelurahan.provinsi,
+    lat: kelurahan.lat,
+    lng: kelurahan.lng,
+    radius: kelurahan.radius,
+    coordinateStatus: kelurahan.coordinateStatus,
+    coordinateSource: kelurahan.coordinateSource,
+    coordinateSourceUrl: kelurahan.coordinateSourceUrl,
+    verifiedAt: kelurahan.verifiedAt,
+    verifiedBy: kelurahan.verifiedBy,
+    verificationReviewedAt: kelurahan.verificationReviewedAt,
+    verificationReviewedBy: kelurahan.verificationReviewedBy,
+    verificationEvidence: kelurahan.verificationEvidence,
+    verificationOperator: kelurahan.verificationOperator,
+    verificationReviewOperator: kelurahan.verificationReviewOperator,
+    verificationAuditId: kelurahan.verificationAuditId,
+    presenceProofRequired: true,
+    catatan: kelurahan.catatan,
     isActive: false,
-    coordinateStatus: KANTOR_SEED.coordinateStatus,
-    coordinateSource: KANTOR_SEED.coordinateSource,
-    coordinateSourceUrl: KANTOR_SEED.coordinateSourceUrl,
-    verifiedAt: KANTOR_SEED.verifiedAt,
-    catatan: KANTOR_SEED.catatan,
-    createdAt: now,
-    updatedAt: now,
-  }, { merge: true });
-  console.log('  ✓ kantor/kantor-padang-kota');
-
-  const configRef = db.collection('projectConfig').doc(PROJECT_CONFIG_SEED.id);
-  batch.set(configRef, {
-    namaProyek: PROJECT_CONFIG_SEED.namaProyek,
-    jamCheckInDeadline: PROJECT_CONFIG_SEED.jamCheckInDeadline,
-    timezone: PROJECT_CONFIG_SEED.timezone,
-    geofenceTransitionMode: PROJECT_CONFIG_SEED.geofenceTransitionMode,
-    defaultKelurahanRadius: PROJECT_CONFIG_SEED.defaultKelurahanRadius,
-    defaultKantorRadius: PROJECT_CONFIG_SEED.defaultKantorRadius,
-    updatedAt: now,
-  }, { merge: true });
-  console.log('  ✓ projectConfig/default');
-
-  await batch.commit();
-
-  console.log(`
-✅ Seed selesai!
-   - ${KELURAHAN_SEED.length} kelurahan
-   - 1 kantor
-   - 1 projectConfig
-
-Cek di: https://console.firebase.google.com/project/iswmp-sumbar-padang/firestore
-`);
+  }));
 }
 
-seed().catch((err) => {
-  console.error('❌ Seed gagal:', err.message);
-  process.exit(1);
-});
+writes.push(write('kantor', KANTOR_SEED.id, {
+  nama: KANTOR_SEED.nama,
+  alamat: KANTOR_SEED.alamat,
+  kota: KANTOR_SEED.kota,
+  provinsi: KANTOR_SEED.provinsi,
+  lat: KANTOR_SEED.lat,
+  lng: KANTOR_SEED.lng,
+  radius: KANTOR_SEED.radius,
+  isActive: false,
+  coordinateStatus: KANTOR_SEED.coordinateStatus,
+  coordinateSource: KANTOR_SEED.coordinateSource,
+  coordinateSourceUrl: KANTOR_SEED.coordinateSourceUrl,
+  verifiedAt: KANTOR_SEED.verifiedAt,
+  verifiedBy: KANTOR_SEED.verifiedBy,
+  verificationReviewedAt: KANTOR_SEED.verificationReviewedAt,
+  verificationReviewedBy: KANTOR_SEED.verificationReviewedBy,
+  verificationEvidence: KANTOR_SEED.verificationEvidence,
+  verificationOperator: KANTOR_SEED.verificationOperator,
+  verificationReviewOperator: KANTOR_SEED.verificationReviewOperator,
+  verificationAuditId: KANTOR_SEED.verificationAuditId,
+  presenceProofRequired: true,
+  catatan: KANTOR_SEED.catatan,
+}));
+
+writes.push(write('projectConfig', PROJECT_CONFIG_SEED.id, {
+  namaProyek: PROJECT_CONFIG_SEED.namaProyek,
+  jamCheckInDeadline: PROJECT_CONFIG_SEED.jamCheckInDeadline,
+  timezone: PROJECT_CONFIG_SEED.timezone,
+  geofenceTransitionMode: PROJECT_CONFIG_SEED.geofenceTransitionMode,
+  maxAttendanceShiftDurationMinutes:
+    PROJECT_CONFIG_SEED.maxAttendanceShiftDurationMinutes,
+  defaultKelurahanRadius: PROJECT_CONFIG_SEED.defaultKelurahanRadius,
+  defaultKantorRadius: PROJECT_CONFIG_SEED.defaultKantorRadius,
+}));
+
+// Proves the replacement credential can read production before any write.
+await api(`${FIRESTORE_ROOT}/projectConfig/${PROJECT_CONFIG_SEED.id}`);
+
+console.log(JSON.stringify({
+  mode: APPLY ? 'apply' : 'dry-run',
+  writes: writes.map(item => item.update.name),
+  warning: 'Apply mereset semua geofence menjadi provisional dan nonaktif.',
+}, null, 2));
+
+if (!APPLY) {
+  console.log('Tidak ada data ditulis. Gunakan --apply hanya untuk reset seed yang disengaja.');
+  process.exit(0);
+}
+
+await api(
+  `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/` +
+    'databases/(default)/documents:commit',
+  { method: 'POST', body: JSON.stringify({ writes }) }
+);
+console.log(`Seed selesai: ${writes.length} dokumen ditulis dalam satu commit.`);

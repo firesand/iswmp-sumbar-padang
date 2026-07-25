@@ -2,7 +2,8 @@
 // GPS wajib untuk absensi; tidak ada fallback ke koordinat kantor.
 
 const ACCURACY_THRESHOLD_METERS = 1000;
-export const MAX_GPS_ACCURACY_FOR_CHECKIN = 500; // tolak jika akurasi GPS > 500m
+// Harus sama atau lebih ketat dari backend attendance-core.
+export const MAX_GPS_ACCURACY_FOR_CHECKIN = 100;
 
 const BLOCKED_LOCATION_SOURCES = new Set(['fallback', 'denied', 'office', 'manual']);
 
@@ -101,7 +102,10 @@ export const getCurrentLocation = () => {
       .then(async (first) => {
         const highResult = toResult(first, 'gps-high');
 
-        if (Number.isFinite(highResult.accuracy) && highResult.accuracy <= 150) {
+        if (
+          Number.isFinite(highResult.accuracy) &&
+          highResult.accuracy <= MAX_GPS_ACCURACY_FOR_CHECKIN
+        ) {
           if (!isValidGpsCoords(highResult)) {
             fail({ code: 2, message: 'Koordinat GPS tidak valid' });
             return;
@@ -168,10 +172,36 @@ const isGeofenceCalibrated = (geofence) =>
   geofence.lat != null &&
   geofence.lng != null &&
   Number.isFinite(Number(geofence.lat)) &&
-  Number.isFinite(Number(geofence.lng));
+  Number.isFinite(Number(geofence.lng)) &&
+  Number(geofence.lat) >= -90 &&
+  Number(geofence.lat) <= 90 &&
+  Number(geofence.lng) >= -180 &&
+  Number(geofence.lng) <= 180 &&
+  Number.isFinite(Number(geofence.radius)) &&
+  Number(geofence.radius) > 0;
 
 // Validate user position against assigned geofence
 export const validateLocationAgainstGeofence = async (geofence) => {
+  // Fail closed: lokasi penugasan yang belum ada, belum aktif, atau belum
+  // memiliki koordinat valid tidak boleh berubah menjadi izin absensi.
+  if (!isGeofenceCalibrated(geofence)) {
+    const geofenceName = geofence?.nama || geofence?.name || 'lokasi penugasan';
+    return {
+      isValid: false,
+      transitionMode: false,
+      message: geofence
+        ? `Geofence ${geofenceName} belum aktif atau belum dikalibrasi. Hubungi admin sebelum melakukan absensi.`
+        : 'Lokasi penugasan belum ditetapkan. Hubungi admin sebelum melakukan absensi.',
+      distance: null,
+      location: null,
+      geofence: geofence || null,
+      maxRadius: geofence?.radius ?? null,
+      source: null,
+      accuracy: null,
+      code: geofence ? 'GEOFENCE_INACTIVE' : 'GEOFENCE_UNASSIGNED',
+    };
+  }
+
   let currentLocation;
 
   try {
@@ -225,23 +255,8 @@ export const validateLocationAgainstGeofence = async (geofence) => {
     };
   }
 
-  const maxRadius = geofence?.radius ?? 300;
-  const geofenceName = geofence?.nama || 'lokasi penugasan';
-
-  // Mode transisi: geofence belum dikalibrasi — GPS tetap wajib, radius di-skip
-  if (!isGeofenceCalibrated(geofence)) {
-    return {
-      isValid: true,
-      transitionMode: true,
-      message: `Geofence ${geofenceName} belum dikalibrasi — kehadiran tercatat dengan GPS aktual, menunggu konfirmasi admin.`,
-      distance: null,
-      location: currentLocation,
-      geofence: geofence || null,
-      maxRadius,
-      source: currentLocation.source,
-      accuracy: currentLocation.accuracy,
-    };
-  }
+  const maxRadius = geofence.radius ?? 300;
+  const geofenceName = geofence.nama || geofence.name || 'lokasi penugasan';
 
   const targetLat = Number(geofence.lat);
   const targetLng = Number(geofence.lng);
@@ -253,21 +268,171 @@ export const validateLocationAgainstGeofence = async (geofence) => {
     targetLng
   );
 
-  const isWithinRadius = distance <= maxRadius;
+  const uncertaintyAdjustedDistance =
+    distance + Number(currentLocation.accuracy);
+  const isWithinRadius = uncertaintyAdjustedDistance <= maxRadius;
   const isValid = isWithinRadius;
 
   return {
     isValid,
     transitionMode: false,
     message: isValid
-      ? `Berada dalam radius ${geofenceName} (${Math.round(distance)}m / max ${maxRadius}m)`
-      : `Anda berada ${Math.round(distance)}m dari ${geofenceName}. Maksimal ${maxRadius}m untuk absensi.`,
+      ? `Berada dalam radius ${geofenceName} (${Math.round(distance)}m + akurasi ${Math.round(currentLocation.accuracy)}m / max ${maxRadius}m)`
+      : `Jarak ${Math.round(distance)}m + margin akurasi ${Math.round(currentLocation.accuracy)}m melewati batas ${maxRadius}m dari ${geofenceName}.`,
     distance: Math.round(distance),
     location: currentLocation,
     geofence,
     maxRadius,
     source: currentLocation.source,
     accuracy: currentLocation.accuracy,
+  };
+};
+
+/**
+ * Validate GPS against one or more operator-declared operational locations
+ * used by location_photo mode (assignment + temporary venues).
+ */
+export const validateLocationAgainstAllowedLocations = async (
+  allowedLocations,
+) => {
+  const candidates = Array.isArray(allowedLocations)
+    ? allowedLocations.filter((entry) =>
+      entry &&
+      typeof entry === 'object' &&
+      Number.isFinite(Number(entry.lat)) &&
+      Number.isFinite(Number(entry.lng)) &&
+      Number.isFinite(Number(entry.radius)) &&
+      Number(entry.radius) > 0
+    )
+    : [];
+
+  if (candidates.length === 0) {
+    return {
+      isValid: false,
+      transitionMode: true,
+      message:
+        'Tidak ada lokasi operasional yang diizinkan untuk absensi saat ini.',
+      distance: null,
+      location: null,
+      matchedLocation: null,
+      code: 'OPERATIONAL_LOCATION_UNAVAILABLE',
+    };
+  }
+
+  let currentLocation;
+  try {
+    currentLocation = await getCurrentLocation();
+    if (
+      Number.isFinite(currentLocation?.accuracy) &&
+      currentLocation.accuracy > ACCURACY_THRESHOLD_METERS
+    ) {
+      const retry = await getCurrentLocation();
+      if (
+        Number.isFinite(retry?.accuracy) &&
+        retry.accuracy < currentLocation.accuracy
+      ) {
+        currentLocation = retry;
+      }
+    }
+  } catch (error) {
+    return {
+      isValid: false,
+      transitionMode: true,
+      message: error.message || 'GPS wajib diaktifkan untuk absensi.',
+      error: error.message,
+      code: error.code || 'GPS_REQUIRED',
+      source: 'denied',
+    };
+  }
+
+  if (!isValidGpsCoords(currentLocation) || currentLocation.source === 'fallback') {
+    return {
+      isValid: false,
+      transitionMode: true,
+      message: 'Lokasi GPS tidak valid. Aktifkan GPS dan izinkan akses lokasi.',
+      source: currentLocation?.source || 'fallback',
+      code: 'GPS_INVALID',
+    };
+  }
+
+  if (
+    Number.isFinite(currentLocation.accuracy) &&
+    currentLocation.accuracy > MAX_GPS_ACCURACY_FOR_CHECKIN
+  ) {
+    return {
+      isValid: false,
+      transitionMode: true,
+      message: `Akurasi GPS terlalu rendah (${Math.round(currentLocation.accuracy)}m). Pindah ke area terbuka dan coba lagi.`,
+      location: currentLocation,
+      source: currentLocation.source,
+      accuracy: currentLocation.accuracy,
+      code: 'GPS_ACCURACY',
+    };
+  }
+
+  let bestMatch = null;
+  let nearestOutside = null;
+  for (const candidate of candidates) {
+    const distance = calculateDistance(
+      currentLocation.lat,
+      currentLocation.lng,
+      Number(candidate.lat),
+      Number(candidate.lng)
+    );
+    const uncertaintyAdjustedDistance =
+      distance + Number(currentLocation.accuracy);
+    const radius = Number(candidate.radius);
+    const name = candidate.name || candidate.nama || candidate.id || 'lokasi';
+    if (uncertaintyAdjustedDistance <= radius) {
+      if (!bestMatch || distance < bestMatch.distance) {
+        bestMatch = {
+          distance: Math.round(distance),
+          maxRadius: radius,
+          matchedLocation: candidate,
+          name,
+        };
+      }
+    } else if (!nearestOutside || distance < nearestOutside.distance) {
+      nearestOutside = {
+        distance: Math.round(distance),
+        maxRadius: radius,
+        name,
+      };
+    }
+  }
+
+  if (bestMatch) {
+    return {
+      isValid: true,
+      transitionMode: true,
+      message:
+        `Berada dalam radius ${bestMatch.name} ` +
+        `(${bestMatch.distance}m + akurasi ${Math.round(currentLocation.accuracy)}m ` +
+        `/ max ${bestMatch.maxRadius}m). Mode operasional sementara — GPS + foto.`,
+      distance: bestMatch.distance,
+      location: currentLocation,
+      matchedLocation: bestMatch.matchedLocation,
+      maxRadius: bestMatch.maxRadius,
+      source: currentLocation.source,
+      accuracy: currentLocation.accuracy,
+    };
+  }
+
+  return {
+    isValid: false,
+    transitionMode: true,
+    message: nearestOutside
+      ? `Jarak ${nearestOutside.distance}m + margin akurasi ` +
+        `${Math.round(currentLocation.accuracy)}m melewati batas ` +
+        `${nearestOutside.maxRadius}m dari ${nearestOutside.name}.`
+      : 'Posisi GPS berada di luar seluruh lokasi operasional yang diizinkan.',
+    distance: nearestOutside?.distance ?? null,
+    location: currentLocation,
+    matchedLocation: null,
+    maxRadius: nearestOutside?.maxRadius ?? null,
+    source: currentLocation.source,
+    accuracy: currentLocation.accuracy,
+    code: 'OUTSIDE_OPERATIONAL_LOCATION',
   };
 };
 

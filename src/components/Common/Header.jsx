@@ -70,7 +70,7 @@ const Header = ({ user, userData }) => {
                   Dashboard
                 </button>
                 <button
-                  onClick={() => navigate('/employee/attendance')}
+                  onClick={() => navigate('/employee')}
                   className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
                 >
                   Attendance
@@ -192,7 +192,7 @@ const Header = ({ user, userData }) => {
                     Dashboard
                   </button>
                   <button
-                    onClick={() => handleNavigation('/employee/attendance')}
+                    onClick={() => handleNavigation('/employee')}
                     className="block w-full text-left px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-50 rounded-md"
                   >
                     Attendance
@@ -270,4 +270,4 @@ const Header = ({ user, userData }) => {
   );
 };
 
-export default Header; 
+export default Header;

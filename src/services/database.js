@@ -1,73 +1,126 @@
 import { 
   collection, 
-  doc, 
-  addDoc, 
+  doc,
+  getDoc,
   getDocs, 
-  getDoc, 
-  updateDoc, 
-  query, 
-  where, 
-  orderBy, 
+  updateDoc,
+  query,
+  where,
+  orderBy,
   limit,
-  serverTimestamp 
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { isValidGpsCoords } from '../utils/geolocation';
+import {
+  getWibDateDaysAgo,
+  getWibDateString,
+} from '../utils/attendanceTime';
+import { isVerifiedAttendance } from '../utils/attendanceIntegrity';
+import {
+  attendanceShiftDurationMs,
+  resolveEmployeeAttendanceState,
+} from '../utils/employeeAttendanceState';
+import { attachEffectiveAttendanceCorrection } from '../utils/attendanceCorrection';
 
-// Attendance functions
-export const addAttendance = async (attendanceData) => {
+export {
+  attendanceShiftDurationMs,
+  formatAttendanceShiftDuration,
+  resolveEmployeeAttendanceState,
+} from '../utils/employeeAttendanceState';
+
+export const getEmployeeAttendanceState = async (
+  userId,
+  now = new Date()
+) => {
   try {
-    // Guard: ensure only one attendance per user per date
-    if (!attendanceData?.userId || !attendanceData?.date) {
-      return { success: false, message: 'Missing userId or date' };
+    if (typeof userId !== 'string' || !userId) {
+      throw new Error('User ID wajib tersedia untuk memuat absensi.');
     }
-
-    if (!isValidGpsCoords(attendanceData.checkInLocation)) {
-      return {
-        success: false,
-        message: 'GPS wajib aktif. Lokasi check-in tidak valid — absensi ditolak.',
-      };
-    }
-
-    const existingQuery = query(
-      collection(db, 'attendances'),
-      where('userId', '==', attendanceData.userId),
-      where('date', '==', attendanceData.date)
-    );
-    const existingSnapshot = await getDocs(existingQuery);
-    if (!existingSnapshot.empty) {
-      return { success: false, message: 'Attendance for today already exists' };
-    }
-
-    const docRef = await addDoc(collection(db, 'attendances'), {
-      ...attendanceData,
-      createdAt: serverTimestamp()
-    });
-    return { success: true, id: docRef.id };
-  } catch (error) {
-    console.error('Add attendance error:', error);
-    return { success: false, message: error.message };
-  }
-};
-
-export const getTodayAttendance = async (userId) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getWibDateString(now);
+    const previousDate = getWibDateDaysAgo(1, now);
     const q = query(
       collection(db, 'attendances'),
       where('userId', '==', userId),
-      where('date', '==', today)
+      where('date', '>=', previousDate),
+      where('date', '<=', today),
+      orderBy('date', 'desc')
     );
-    
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
-      return snapshot.docs[0].data();
+    const [snapshot, configSnapshot] = await Promise.all([
+      getDocs(q),
+      getDoc(doc(db, 'projectConfig', 'default')),
+    ]);
+    const projectConfig = configSnapshot.exists()
+      ? configSnapshot.data()
+      : null;
+    const maximumShiftDurationMinutes =
+      projectConfig?.maxAttendanceShiftDurationMinutes ?? null;
+    const maximumShiftDurationMs = attendanceShiftDurationMs(
+      maximumShiftDurationMinutes
+    );
+    if (maximumShiftDurationMs == null) {
+      throw new Error(
+        'Kebijakan batas durasi shift belum tersedia atau tidak valid.'
+      );
     }
-    return null;
+    const canonicalRecords = snapshot.docs.map((attendanceDoc) => ({
+      id: attendanceDoc.id,
+      ...attendanceDoc.data(),
+    }));
+    const projectionSnapshots = await Promise.all(
+      canonicalRecords.map((record) =>
+        getDoc(doc(db, 'attendanceCorrectionEffectiveViews', record.id))
+      )
+    );
+    const records = canonicalRecords.map((record, index) =>
+      attachEffectiveAttendanceCorrection(
+        record,
+        projectionSnapshots[index].exists()
+          ? projectionSnapshots[index].data()
+          : null
+      )
+    );
+    return {
+      ...resolveEmployeeAttendanceState(
+        records,
+        now,
+        userId,
+        maximumShiftDurationMs
+      ),
+      maximumShiftDurationMinutes,
+      maximumShiftDurationMs,
+      attendanceVerificationMode:
+        projectConfig?.attendanceVerificationMode || 'geofence_onsite',
+      locationPhotoModeExpiresAt:
+        projectConfig?.locationPhotoModeExpiresAt || null,
+      loadError: null,
+    };
   } catch (error) {
-    console.error('Get today attendance error:', error);
-    return null;
+    console.error('Get employee attendance state error:', error);
+    return {
+      ...resolveEmployeeAttendanceState([], now, userId, 0),
+      maximumShiftDurationMinutes: null,
+      maximumShiftDurationMs: null,
+      attendanceVerificationMode: null,
+      locationPhotoModeExpiresAt: null,
+      loadError:
+        'Status shift tidak dapat dimuat. Muat ulang halaman sebelum melakukan absensi.',
+    };
   }
+};
+
+// Attendance functions
+export const addAttendance = async (attendanceData) => {
+  console.error('Direct attendance write blocked', attendanceData?.date);
+  return {
+    success: false,
+    message:
+      'Alur absensi lama dinonaktifkan. Gunakan challenge dan callable backend.',
+  };
+};
+
+export const getTodayAttendance = async (userId) => {
+  const attendanceState = await getEmployeeAttendanceState(userId);
+  return attendanceState.todayAttendance;
 };
 
 export const getAttendanceHistory = async (userId, limitCount = 30) => {
@@ -186,7 +239,9 @@ export const getAttendanceStats = async (date) => {
     );
     
     const snapshot = await getDocs(q);
-    const attendances = snapshot.docs.map(doc => doc.data());
+    const attendances = snapshot.docs
+      .map(doc => doc.data())
+      .filter(isVerifiedAttendance);
     
     const stats = {
       total: attendances.length,
@@ -213,9 +268,11 @@ export const getWeeklyAttendance = async (startDate, endDate) => {
     );
     
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(isVerifiedAttendance);
   } catch (error) {
     console.error('Get weekly attendance error:', error);
     return [];
   }
-}; 
+};

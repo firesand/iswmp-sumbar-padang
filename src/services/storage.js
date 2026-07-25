@@ -32,32 +32,12 @@ export const uploadProfilePhoto = async (file, userId) => {
 };
 
 export const uploadAttendancePhoto = async (file, userId, date) => {
-  try {
-    // Validate file
-    if (!file) {
-      throw new Error('No file provided');
-    }
-
-    // Get file extension safely
-    const fileExtension = file.name ? file.name.split('.').pop() : 'jpg';
-    const fileName = `attendance_${userId}_${date}_${Date.now()}.${fileExtension}`;
-
-    // Create storage reference
-    const storageRef = ref(storage, `attendances/${userId}/${fileName}`);
-
-    // Upload file
-    console.log('Uploading attendance photo:', fileName);
-    const snapshot = await uploadBytes(storageRef, file);
-
-    // Get download URL
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    console.log('Attendance photo uploaded:', downloadURL);
-
-    return downloadURL;
-  } catch (error) {
-    console.error('Upload attendance photo error:', error);
-    throw error;
-  }
+  void file;
+  void userId;
+  void date;
+  throw new Error(
+    'Upload attendance lama dinonaktifkan. Foto wajib memakai path dari challenge backend.'
+  );
 };
 
 export const uploadDocument = async (file, userId, documentType) => {

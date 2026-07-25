@@ -7,13 +7,14 @@ import {
   doc,
   getDoc,
   getDocs,
-  setDoc,
   updateDoc,
   deleteDoc,
   query,
   where,
   orderBy,
-  Timestamp
+  Timestamp,
+  writeBatch,
+  serverTimestamp
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
@@ -34,8 +35,106 @@ import AdminNotificationPanel from './NotificationPanel';
 import DeleteEmployeeModal from './DeleteEmployeeModal';
 import DailyReminderPanel from './DailyReminderPanel';
 import IncompleteRegistrations from './IncompleteRegistrations';
-import { ADMIN_CONFIG, validateAdminConfig } from '../../config/adminConfig';
+import OnsitePresenceCode from './OnsitePresenceCode';
+import GeofenceVerificationPanel from './GeofenceVerificationPanel';
+import AttendanceCorrectionPanel from './AttendanceCorrectionPanel';
+import {
+  ADMIN_CONFIG,
+  PRIVATE_ATTENDANCE_NOTICE_ADMIN_UID,
+  validateAdminConfig,
+} from '../../config/adminConfig';
 import { hasAdminAccess } from '../../utils/authorization';
+import {
+  formatWibDate,
+  formatWibTime,
+  getWibDateDaysAgo,
+  getWibDateString,
+} from '../../utils/attendanceTime';
+import {
+  isAttendanceWorkflowEligible,
+  isLocationPhotoAttendance,
+  isReviewableAttendancePhoto,
+  isVerifiedAttendance,
+} from '../../utils/attendanceIntegrity';
+import {
+  getAttendanceErrorMessage,
+  getAttendancePhotoUrl,
+} from '../../services/attendanceService';
+import {
+  FIELD_STAFF_TYPES,
+  OFFICE_STAFF_ROLES,
+} from '../../services/geofenceService';
+import {
+  attendanceTimestampMillis,
+  formatAttendanceWibDateTime,
+  getAttendanceLocationLabel,
+  getCanonicalEarlyLeaveDetails,
+  isCrossDayAttendance,
+  rowsToCsv,
+} from '../../utils/attendanceDisplay';
+import {
+  attachEffectiveAttendanceCorrection,
+  resolveAttendanceCompletion,
+} from '../../utils/attendanceCorrection';
+
+const attachCorrectionViews = async (records) => {
+  const projectionSnapshots = await Promise.all(
+    records.map((record) => getDoc(doc(
+      db,
+      'attendanceCorrectionEffectiveViews',
+      record.id
+    )))
+  );
+  return records.map((record, index) =>
+    attachEffectiveAttendanceCorrection(
+      record,
+      projectionSnapshots[index].exists()
+        ? projectionSnapshots[index].data()
+        : null
+    )
+  );
+};
+
+const fieldStaffLabels = new Map(
+  FIELD_STAFF_TYPES.map(type => [type.value, type.label])
+);
+const officeStaffLabels = new Map(
+  OFFICE_STAFF_ROLES.map(role => [role.value, role.label])
+);
+
+const getRegistrationAssignment = (registration) => {
+  if (registration?.role === 'field_staff'
+    && registration.assignmentType === 'kelurahan'
+    && typeof registration.kelurahanId === 'string'
+    && typeof registration.kelurahanNama === 'string'
+    && fieldStaffLabels.has(registration.jenisTenagaAhli)) {
+    return {
+      valid: true,
+      category: 'Staf lapangan',
+      location: `${registration.kelurahanNama} (${registration.kelurahanId})`,
+      position: fieldStaffLabels.get(registration.jenisTenagaAhli),
+    };
+  }
+
+  if (registration?.role === 'office_staff'
+    && registration.assignmentType === 'kantor'
+    && registration.kantorId === 'kantor-padang-kota'
+    && officeStaffLabels.has(registration.peranKantor)) {
+    return {
+      valid: true,
+      category: 'Staf kantor',
+      location: `Kantor ISWMP Kota Padang (${registration.kantorId})`,
+      position: officeStaffLabels.get(registration.peranKantor),
+    };
+  }
+
+  return {
+    valid: false,
+    category: 'Tidak valid',
+    location: 'Penugasan tidak canonical',
+    position: 'Tolak dan minta pendaftar memperbaiki data',
+  };
+};
 
 const getRegistrationTime = (registration) => {
   const timestamp = registration.requestedAt || registration.registeredAt || registration.createdAt;
@@ -48,6 +147,10 @@ const getRegistrationTime = (registration) => {
 
 const sortRegistrationsByNewest = (registrations) =>
   [...registrations].sort((a, b) => getRegistrationTime(b) - getRegistrationTime(a));
+
+const isActiveAccount = user => (
+  user?.accountStatus === 'active' && user?.isActive === true
+);
 
 const getGoogleMapsUrl = (location) => {
   if (!location || typeof location !== 'object') return null;
@@ -87,6 +190,8 @@ function AdminDashboard() {
   const [pendingRegistrationsError, setPendingRegistrationsError] = useState('');
   const [employees, setEmployees] = useState([]);
   const [todayAttendances, setTodayAttendances] = useState([]);
+  const [previousOpenAttendances, setPreviousOpenAttendances] = useState([]);
+  const [attendancePolicy, setAttendancePolicy] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -152,6 +257,25 @@ function AdminDashboard() {
           console.error('Error fetching user data:', userError);
           alert('Error loading user data. Please try again.');
           return;
+        }
+
+        if (user.uid === PRIVATE_ATTENDANCE_NOTICE_ADMIN_UID) {
+          try {
+            const policySnapshot = await getDoc(
+              doc(db, 'projectConfig', 'default')
+            );
+            setAttendancePolicy(
+              policySnapshot.exists() ? policySnapshot.data() : null
+            );
+          } catch (policyError) {
+            console.error(
+              'Error fetching private attendance policy notice:',
+              policyError
+            );
+            setAttendancePolicy(null);
+          }
+        } else {
+          setAttendancePolicy(null);
         }
 
         // Fetch pending registrations
@@ -247,21 +371,63 @@ function AdminDashboard() {
         let attendances = [];
         try {
           console.log('Fetching today\'s attendances...');
-          const today = new Date().toISOString().split('T')[0];
+          const today = getWibDateString();
           const attendanceQuery = query(
             collection(db, 'attendances'),
             where('date', '==', today)
           );
           const attendanceSnapshot = await getDocs(attendanceQuery);
-          attendances = attendanceSnapshot.docs.map(doc => ({
+          attendances = await attachCorrectionViews(
+            attendanceSnapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
-          }));
+            }))
+          );
           setTodayAttendances(attendances);
           console.log('Today\'s attendances loaded:', attendances.length);
         } catch (attError) {
           console.error('Error fetching attendances:', attError);
           setTodayAttendances([]);
+        }
+
+        // Previous-day open shifts are operational follow-ups only. They are
+        // deliberately not merged into `attendances`, so today's presence and
+        // late statistics remain based solely on today's shift date.
+        try {
+          const now = new Date();
+          const previousDate = getWibDateDaysAgo(1, now);
+          const previousAttendanceQuery = query(
+            collection(db, 'attendances'),
+            where('date', '==', previousDate)
+          );
+          const previousAttendanceSnapshot = await getDocs(
+            previousAttendanceQuery
+          );
+          const previousRecords = await attachCorrectionViews(
+            previousAttendanceSnapshot.docs.map((attendanceDoc) => ({
+              id: attendanceDoc.id,
+              ...attendanceDoc.data(),
+            }))
+          );
+          const openShifts = previousRecords
+            .filter((attendance) =>
+              !resolveAttendanceCompletion(attendance).isComplete &&
+              isAttendanceWorkflowEligible(attendance)
+            )
+            .sort((left, right) => {
+              const checkInOrder =
+                (attendanceTimestampMillis(left.checkIn) || 0) -
+                (attendanceTimestampMillis(right.checkIn) || 0);
+              return checkInOrder ||
+                String(left.id).localeCompare(String(right.id));
+            });
+          setPreviousOpenAttendances(openShifts);
+        } catch (openShiftError) {
+          console.error(
+            'Error fetching previous-day open shifts:',
+            openShiftError
+          );
+          setPreviousOpenAttendances([]);
         }
 
         // Calculate stats using fetched data directly
@@ -280,15 +446,20 @@ function AdminDashboard() {
           console.log('Registrations data:', registrations);
           
           // Use data directly from queries, not from state
-          const activeEmployees = employeesList.filter(emp => emp.accountStatus === 'active');
+          const activeEmployees = employeesList.filter(isActiveAccount);
           const suspendedEmployees = employeesList.filter(emp => emp.accountStatus === 'suspended');
-          const lateAttendances = attendances.filter(att => att.status === 'late');
+          const operationalAttendances = attendances.filter(
+            isAttendanceWorkflowEligible
+          );
+          const lateAttendances = operationalAttendances.filter(
+            att => att.status === 'late'
+          );
           
           const newStats = {
             totalEmployees: employeesList.length,
             activeEmployees: activeEmployees.length,
             suspendedEmployees: suspendedEmployees.length,
-            presentToday: attendances.length,
+            presentToday: operationalAttendances.length,
             pendingApprovals: registrations.length,
             lateToday: lateAttendances.length
           };
@@ -341,13 +512,13 @@ function AdminDashboard() {
         // Send notifications based on settings
         if (notificationSettings.method === 'whatsapp' || notificationSettings.method === 'both') {
           notifyLateCheckIn(ADMIN_CONFIG.phone, attendance.userName,
-                            checkInTime.toLocaleTimeString('id-ID'));
+                            formatWibTime(checkInTime));
         }
 
         if (notificationSettings.method === 'email' || notificationSettings.method === 'both') {
           await sendLateAlert(ADMIN_CONFIG.email, {
             name: attendance.userName,
-            checkInTime: checkInTime.toLocaleTimeString('id-ID'),
+            checkInTime: formatWibTime(checkInTime),
                               department: attendance.department || 'N/A'
           });
         }
@@ -357,7 +528,7 @@ function AdminDashboard() {
 
   // Send daily reminders to all active employees
   const sendDailyReminders = async () => {
-    const activeEmployees = employees.filter(emp => emp.accountStatus === 'active');
+    const activeEmployees = employees.filter(isActiveAccount);
     let sent = 0;
     let skippedNoPhone = 0;
     const links = [];
@@ -416,24 +587,43 @@ function AdminDashboard() {
 
   // Approve registration with notifications
   const approveRegistration = async (registration) => {
+    const assignment = getRegistrationAssignment(registration);
+    if (!assignment.valid) {
+      alert('Penugasan pendaftar tidak valid. Persetujuan diblokir; pilih Reject dan minta pendaftaran ulang.');
+      return;
+    }
+    const assignmentConfirmed = window.confirm(
+      `Konfirmasi penugasan sebelum mengaktifkan akun:\n\n` +
+      `Nama: ${registration.name}\n` +
+      `Kategori: ${assignment.category}\n` +
+      `Lokasi: ${assignment.location}\n` +
+      `Peran: ${assignment.position}\n\n` +
+      'Apakah data ini sudah diverifikasi dari sumber personel resmi?'
+    );
+    if (!assignmentConfirmed) return;
+
     setProcessingId(registration.id);
     try {
-      // Update user status to active
-      await updateDoc(doc(db, 'users', registration.userId), {
+      // Keep the profile and approval queue in one atomic commit.
+      const approvalBatch = writeBatch(db);
+      approvalBatch.update(doc(db, 'users', registration.userId), {
         accountStatus: 'active',
         isActive: true,
-        approvedAt: Timestamp.now(),
-                      approvedBy: auth.currentUser.uid
+        approvedAt: serverTimestamp(),
+        approvedBy: auth.currentUser.uid,
+        assignmentReviewedAt: serverTimestamp(),
+        assignmentReviewedBy: auth.currentUser.uid
       });
 
-      // setDoc with merge also handles a recovered pending profile whose
+      // Merge also handles a recovered pending profile whose
       // registrationRequests document was rejected by older Firestore rules.
-      await setDoc(doc(db, 'registrationRequests', registration.id), {
+      approvalBatch.set(doc(db, 'registrationRequests', registration.id), {
         userId: registration.userId,
         status: 'approved',
         reviewedBy: auth.currentUser.uid,
-        reviewedAt: Timestamp.now()
+        reviewedAt: serverTimestamp()
       }, { merge: true });
+      await approvalBatch.commit();
 
       // Remove from pending list
       setPendingRegistrations(prev => prev.filter(r => r.id !== registration.id));
@@ -534,19 +724,22 @@ function AdminDashboard() {
 
     setProcessingId(registration.id);
     try {
-      await setDoc(doc(db, 'registrationRequests', registration.id), {
+      // Reject the queue item and user profile atomically.
+      const rejectionBatch = writeBatch(db);
+      rejectionBatch.set(doc(db, 'registrationRequests', registration.id), {
         userId: registration.userId,
         status: 'rejected',
         reviewedBy: auth.currentUser.uid,
-        reviewedAt: Timestamp.now()
+        reviewedAt: serverTimestamp()
       }, { merge: true });
 
-      await updateDoc(doc(db, 'users', registration.userId), {
+      rejectionBatch.update(doc(db, 'users', registration.userId), {
         accountStatus: 'rejected',
         isActive: false,
-        rejectedAt: Timestamp.now(),
+        rejectedAt: serverTimestamp(),
         rejectedBy: auth.currentUser.uid
       });
+      await rejectionBatch.commit();
 
       // Get user data for notification
       const userDoc = await getDoc(doc(db, 'users', registration.userId));
@@ -594,6 +787,11 @@ function AdminDashboard() {
 
   // Toggle employee status
   const toggleEmployeeStatus = async (employee) => {
+    if (!['active', 'suspended'].includes(employee.accountStatus)) {
+      alert('Hanya akun active atau suspended yang dapat diubah dari menu ini.');
+      return;
+    }
+
     const newStatus = employee.accountStatus === 'active' ? 'suspended' : 'active';
     const action = newStatus === 'active' ? 'activate' : 'suspend';
 
@@ -604,7 +802,9 @@ function AdminDashboard() {
     try {
       await updateDoc(doc(db, 'users', employee.id), {
         accountStatus: newStatus,
-        isActive: newStatus === 'active'
+        isActive: newStatus === 'active',
+        statusChangedAt: serverTimestamp(),
+        statusChangedBy: auth.currentUser.uid
       });
 
       // Update local state
@@ -625,11 +825,9 @@ function AdminDashboard() {
   const editEmployee = async (employeeData) => {
     try {
       setProcessingId(employeeData.id);
-      
-      // Update employee data in Firestore
-      await updateDoc(doc(db, 'users', employeeData.id), {
+
+      const updatePayload = {
         name: employeeData.name,
-        email: employeeData.email,
         employeeId: employeeData.employeeId,
         department: employeeData.department,
         position: employeeData.position,
@@ -640,7 +838,21 @@ function AdminDashboard() {
         address: employeeData.address,
         emergencyContact: employeeData.emergencyContact,
         emergencyPhone: employeeData.emergencyPhone,
-        updatedAt: Timestamp.now(),
+      };
+      const currentEmployee = employees.find(employee => employee.id === employeeData.id);
+      const hasProfileChanges = !currentEmployee || Object.entries(updatePayload)
+        .some(([field, value]) => (currentEmployee[field] ?? '') !== value);
+      if (!hasProfileChanges) {
+        alert('Tidak ada perubahan data yang perlu disimpan.');
+        setShowEditModal(false);
+        setEditingEmployee(null);
+        return;
+      }
+
+      // Update employee data in Firestore
+      await updateDoc(doc(db, 'users', employeeData.id), {
+        ...updatePayload,
+        updatedAt: serverTimestamp(),
         updatedBy: auth.currentUser.uid
       });
 
@@ -700,7 +912,7 @@ function AdminDashboard() {
       setStats(prev => ({
         ...prev,
         totalEmployees: prev.totalEmployees - 1,
-        activeEmployees: prev.activeEmployees - (deletedEmployee.accountStatus === 'active' ? 1 : 0),
+        activeEmployees: prev.activeEmployees - (isActiveAccount(deletedEmployee) ? 1 : 0),
         suspendedEmployees: prev.suspendedEmployees - (deletedEmployee.accountStatus === 'suspended' ? 1 : 0)
       }));
     }
@@ -710,11 +922,29 @@ function AdminDashboard() {
     setEmployeeToDelete(null);
   };
 
-  // Format time
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '-';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const handleOpenAttendancePhoto = async (attendance, action) => {
+    if (!isReviewableAttendancePhoto(attendance, action)) {
+      alert('Bukti legacy atau tidak terverifikasi tidak dapat dibuka.');
+      return;
+    }
+
+    const preview = window.open('', '_blank');
+    if (preview) {
+      preview.opener = null;
+      preview.document.title = 'Memuat bukti absensi…';
+      preview.document.body.textContent = 'Memuat bukti absensi…';
+    }
+    try {
+      const { url } = await getAttendancePhotoUrl(attendance.id, action);
+      if (preview) {
+        preview.location.replace(url);
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      preview?.close();
+      alert(getAttendanceErrorMessage(error));
+    }
   };
 
   // Calculate work duration
@@ -741,7 +971,7 @@ function AdminDashboard() {
   const formatDate = (timestamp) => {
     if (!timestamp) return '-';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+    return formatWibDate(date, { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
   // Handle logout
@@ -756,24 +986,92 @@ function AdminDashboard() {
 
   // Export attendance to CSV
   const exportAttendance = () => {
-    const csvContent = [
-      ['Name', 'Date', 'Check In', 'Check Out', 'Status', 'Work Hours'],
-      ...todayAttendances.map(att => [
-        att.userName,
-        att.date,
-        formatTime(att.checkIn),
-          formatTime(att.checkOut),
-            att.status,
-            att.workHours || '-'
-      ])
-    ].map(row => row.join(',')).join('\n');
+    const csvRows = [
+      [
+        'Employee Name',
+        'Shift Date',
+        'Check In (WIB)',
+        'Check Out (WIB)',
+        'Cross-Day',
+        'Status',
+        'Raw verificationStatus',
+        'Attendance Mode',
+        'Canonical Verification',
+        'Work Hours',
+        'Early Leave (Canonical)',
+        'Early Leave Reason',
+      ],
+      ...todayAttendances.map((att) => {
+        const completion = resolveAttendanceCompletion(att);
+        const earlyLeave = getCanonicalEarlyLeaveDetails(att);
+        return [
+          att.userName,
+          att.date,
+          formatAttendanceWibDateTime(att.checkIn),
+          formatAttendanceWibDateTime(
+            completion.checkOut,
+            'Not checked out'
+          ),
+          completion.checkOut
+            ? isCrossDayAttendance({
+              ...att,
+              checkOut: completion.checkOut,
+            }) ? 'Yes' : 'No'
+            : 'N/A',
+          att.status,
+          att.verificationStatus || 'missing',
+          isVerifiedAttendance(att)
+            ? att.verificationMode || 'geofence_onsite'
+            : isLocationPhotoAttendance(att)
+              ? 'location_photo'
+              : 'legacy',
+          completion.manualCorrection
+            ? 'Administrative correction (not device verified)'
+            : isVerifiedAttendance(att)
+              ? 'Verified v2'
+              : isLocationPhotoAttendance(att)
+                ? 'GPS + photo'
+              : 'Unverified / legacy',
+          completion.isComplete ? completion.workHours : '-',
+          earlyLeave.isEarlyLeave ? 'Yes' : 'No',
+          earlyLeave.isEarlyLeave
+            ? earlyLeave.reason || 'Reason unavailable'
+            : '',
+        ];
+      })
+    ];
+    const csvContent = `\uFEFF${rowsToCsv(csvRows)}`;
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const blob = new Blob(
+      [csvContent],
+      { type: 'text/csv;charset=utf-8' }
+    );
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `attendance-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `attendance-${getWibDateString()}.csv`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+  };
+
+  const handleAttendanceCorrectionChanged = ({
+    attendanceId: correctedAttendanceId,
+    projection,
+  } = {}) => {
+    if (!correctedAttendanceId || !projection) return;
+    const applyProjection = (records) => records.map((record) =>
+      record.id === correctedAttendanceId
+        ? attachEffectiveAttendanceCorrection(record, projection)
+        : record
+    );
+    setTodayAttendances((records) => applyProjection(records));
+    setPreviousOpenAttendances((records) =>
+      applyProjection(records).filter(
+        (record) => !resolveAttendanceCompletion(record).isComplete
+      )
+    );
   };
 
   // Admin password reset function
@@ -918,6 +1216,24 @@ function AdminDashboard() {
     }
   };
 
+  const attendancePolicyExpiresAtMs = attendanceTimestampMillis(
+    attendancePolicy?.locationPhotoModeExpiresAt
+  );
+  const showPrivateAttendancePolicyNotice = Boolean(
+    userData &&
+    auth.currentUser?.uid === PRIVATE_ATTENDANCE_NOTICE_ADMIN_UID &&
+    attendancePolicy?.attendanceVerificationMode === 'location_photo' &&
+    attendancePolicyExpiresAtMs != null &&
+    attendancePolicyExpiresAtMs > Date.now()
+  );
+  const attendancePolicyExpiryLabel = attendancePolicyExpiresAtMs == null
+    ? null
+    : `${formatWibDate(attendancePolicyExpiresAtMs, {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })}, ${formatWibTime(attendancePolicyExpiresAtMs)} WIB`;
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
@@ -992,6 +1308,28 @@ function AdminDashboard() {
     </div>
 
     <div className="max-w-7xl mx-auto px-2 sm:px-4 py-6">
+    {showPrivateAttendancePolicyNotice && (
+      <div
+        role="status"
+        className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm"
+      >
+        <p className="font-semibold text-amber-950">
+          ⚠️ Catatan pribadi: mode sementara aktif
+        </p>
+        <p className="mt-1 text-sm text-amber-900">
+          Check-in dan check-out memakai foto langsung serta titik GPS tanpa
+          validasi geofence. Lokasi masih berisiko dimanipulasi dengan fake GPS,
+          dan catatannya tidak diklasifikasikan sebagai Verified v2.
+        </p>
+        {attendancePolicyExpiryLabel && (
+          <p className="mt-2 text-xs font-medium text-amber-800">
+            Berakhir otomatis pada {attendancePolicyExpiryLabel}. Notifikasi
+            ini hanya ditampilkan pada akun Anda.
+          </p>
+        )}
+      </div>
+    )}
+
     {pendingRegistrationsError && (
       <div
         role="alert"
@@ -1078,8 +1416,11 @@ function AdminDashboard() {
     <div className="bg-white rounded-xl shadow-md p-3 sm:p-6">
     <div className="flex items-center justify-between">
     <div>
-    <p className="text-xs sm:text-sm text-gray-600">Present Today</p>
+    <p className="text-xs sm:text-sm text-gray-600">Recorded Today</p>
     <p className="text-xl sm:text-3xl font-bold text-purple-600">{stats.presentToday}</p>
+    <p className="mt-1 text-[10px] text-gray-500">
+      Verified + GPS/foto
+    </p>
     </div>
     <div className="w-8 h-8 sm:w-12 sm:h-12 bg-purple-100 rounded-lg flex items-center justify-center">
     <svg className="w-4 h-4 sm:w-6 sm:h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1259,6 +1600,26 @@ function AdminDashboard() {
     📱 Daily Reminders
     </button>
     <button
+    onClick={() => setActiveTab('onsite-code')}
+    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+      activeTab === 'onsite-code'
+      ? 'border-green-500 text-green-600'
+      : 'border-transparent text-gray-500 hover:text-gray-700'
+    }`}
+    >
+    🔢 Kode Onsite
+    </button>
+    <button
+    onClick={() => setActiveTab('geofence-verification')}
+    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+      activeTab === 'geofence-verification'
+      ? 'border-green-500 text-green-600'
+      : 'border-transparent text-gray-500 hover:text-gray-700'
+    }`}
+    >
+    📍 Verifikasi Geofence
+    </button>
+    <button
     onClick={() => setActiveTab('reports')}
     className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
       activeTab === 'reports'
@@ -1276,7 +1637,14 @@ function AdminDashboard() {
     {activeTab === 'overview' && (
       <div>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
-      <h3 className="text-base sm:text-lg font-semibold text-gray-800">Today's Attendance Record</h3>
+      <div>
+        <h3 className="text-base sm:text-lg font-semibold text-gray-800">
+          Today's Attendance Record
+        </h3>
+        <p className="mt-1 text-xs text-gray-500">
+          Statistik dan tabel ini memakai tanggal shift hari ini.
+        </p>
+      </div>
       {todayAttendances.length > 0 && (
         <button
         onClick={exportAttendance}
@@ -1290,11 +1658,72 @@ function AdminDashboard() {
       )}
       </div>
 
+      {previousOpenAttendances.length > 0 && (
+        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="mb-3">
+            <h4 className="font-semibold text-blue-900">
+              Shift Tanggal Sebelumnya Masih Aktif
+            </h4>
+            <p className="mt-1 text-xs text-blue-800">
+              {previousOpenAttendances.length} shift menunggu checkout. Daftar
+              ini tidak dihitung sebagai hadir hari ini.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[650px]">
+              <thead>
+                <tr className="border-b border-blue-200">
+                  <th className="px-2 py-2 text-left text-xs font-medium text-blue-900">
+                    Employee
+                  </th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-blue-900">
+                    Shift Date
+                  </th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-blue-900">
+                    Check In (WIB)
+                  </th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-blue-900">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {previousOpenAttendances.map((attendance) => (
+                  <tr key={attendance.id} className="border-b border-blue-100">
+                    <td className="px-2 py-2 text-xs font-medium text-gray-800">
+                      {attendance.userName || attendance.userId}
+                    </td>
+                    <td className="px-2 py-2 text-xs text-gray-700">
+                      {attendance.date}
+                    </td>
+                    <td className="px-2 py-2 text-xs text-gray-700">
+                      {formatAttendanceWibDateTime(attendance.checkIn)}
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      <span className={`rounded px-2 py-1 font-medium ${
+                        isLocationPhotoAttendance(attendance)
+                          ? 'bg-amber-100 text-amber-900'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {isLocationPhotoAttendance(attendance)
+                          ? 'GPS + foto · Menunggu checkout'
+                          : 'Verified v2 · Menunggu checkout'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto -mx-6 px-6">
-      <table className="w-full min-w-[800px]">
+      <table className="w-full min-w-[950px]">
       <thead>
       <tr className="border-b bg-gray-50">
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Employee</th>
+      <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Shift Date</th>
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Check In</th>
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Check Out</th>
       <th className="text-left py-3 px-2 text-xs font-medium text-gray-700">Status</th>
@@ -1306,6 +1735,26 @@ function AdminDashboard() {
       <tbody>
       {todayAttendances.length > 0 ? (
         todayAttendances.map((attendance) => {
+          const attendanceVerified = isVerifiedAttendance(attendance);
+          const attendanceLocationPhoto =
+            isLocationPhotoAttendance(attendance);
+          const attendanceOperational =
+            isAttendanceWorkflowEligible(attendance);
+          const completion = resolveAttendanceCompletion(attendance);
+          const attendanceForDisplay = {
+            ...attendance,
+            checkOut: completion.checkOut,
+          };
+          const canOpenCheckInPhoto =
+            isReviewableAttendancePhoto(attendance, 'checkIn');
+          const canOpenCheckOutPhoto =
+            isReviewableAttendancePhoto(attendance, 'checkOut');
+          const hasBlockedPhotoReference = Boolean(
+            attendance.checkInPhoto ||
+            attendance.checkOutPhoto ||
+            (!canOpenCheckInPhoto && attendance.checkInPhotoPath) ||
+            (!canOpenCheckOutPhoto && attendance.checkOutPhotoPath)
+          );
           const checkInMapsUrl = getGoogleMapsUrl(attendance.checkInLocation);
           const checkOutMapsUrl = getGoogleMapsUrl(attendance.checkOutLocation);
           const checkInAccuracy = getLocationAccuracy(
@@ -1313,17 +1762,54 @@ function AdminDashboard() {
             attendance.locationAccuracy
           );
           const checkOutAccuracy = getLocationAccuracy(attendance.checkOutLocation);
+          const earlyLeave =
+            getCanonicalEarlyLeaveDetails(attendance);
 
           return (
           <tr key={attendance.id} className="border-b hover:bg-gray-50">
           <td className="py-3 px-2">
           <p className="font-medium text-gray-800 text-xs">{attendance.userName}</p>
+          <span className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+            attendanceVerified
+              ? 'bg-emerald-100 text-emerald-800'
+              : attendanceLocationPhoto
+                ? 'bg-amber-100 text-amber-900'
+              : 'bg-red-100 text-red-800'
+          }`}>
+            {attendanceVerified
+              ? 'Verified v2'
+              : attendanceLocationPhoto
+                ? 'GPS + foto'
+                : 'Unverified / legacy'}
+          </span>
           </td>
           <td className="py-3 px-2 text-xs text-gray-600">
-          {formatTime(attendance.checkIn)}
+          {attendance.date || '-'}
           </td>
           <td className="py-3 px-2 text-xs text-gray-600">
-          {formatTime(attendance.checkOut)}
+          {formatAttendanceWibDateTime(attendance.checkIn)}
+          </td>
+          <td className="py-3 px-2 text-xs text-gray-600">
+          {formatAttendanceWibDateTime(completion.checkOut)}
+          {isCrossDayAttendance(attendanceForDisplay) && (
+            <span className="mt-1 block text-[10px] font-medium text-blue-700">
+              Lintas hari
+            </span>
+          )}
+          {completion.manualCorrection && (
+            <span className="mt-1 block text-[10px] font-medium text-orange-800">
+              Koreksi admin · bukan bukti perangkat
+            </span>
+          )}
+          {earlyLeave.isEarlyLeave && (
+            <span className="mt-1 block max-w-[240px] text-[10px] text-orange-800">
+              <span className="font-semibold">Pulang awal</span>
+              {' — '}
+              <span title={earlyLeave.reason || 'Alasan tidak tersedia'}>
+                {earlyLeave.reason || 'Alasan tidak tersedia'}
+              </span>
+            </span>
+          )}
           </td>
           <td className="py-3 px-2">
           <span className={`inline-block px-1 py-1 text-xs rounded-full ${
@@ -1335,7 +1821,9 @@ function AdminDashboard() {
           </span>
           </td>
           <td className="py-3 px-2 text-xs text-gray-600">
-          {attendance.workHours ? `${attendance.workHours}h` : '-'}
+          {attendanceOperational && completion.isComplete
+            ? `${completion.workHours}h`
+            : '-'}
           </td>
           <td className="py-3 px-2">
           <div className="flex flex-col items-start gap-1">
@@ -1364,34 +1852,43 @@ function AdminDashboard() {
           {!checkInMapsUrl && !checkOutMapsUrl && (
             <span className="text-xs text-gray-400">-</span>
           )}
-          {attendance.geofenceName && (
-            <span className="max-w-[180px] truncate text-[11px] text-gray-500" title={attendance.geofenceName}>
-            {attendance.geofenceName}
+          {getAttendanceLocationLabel(attendance) && (
+            <span
+              className="max-w-[180px] truncate text-[11px] text-gray-500"
+              title={getAttendanceLocationLabel(attendance)}
+            >
+            {getAttendanceLocationLabel(attendance)}
             </span>
           )}
           </div>
           </td>
           <td className="py-3 px-2">
           <div className="flex space-x-2">
-          {attendance.checkInPhoto && (
-            <a
-            href={attendance.checkInPhoto}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 text-xs"
+          {canOpenCheckInPhoto && (
+            <button
+              type="button"
+              onClick={() => handleOpenAttendancePhoto(attendance, 'checkIn')}
+              className="text-blue-600 hover:text-blue-800 text-xs"
             >
-            In
-            </a>
+              In
+            </button>
           )}
-          {attendance.checkOutPhoto && (
-            <a
-            href={attendance.checkOutPhoto}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 text-xs"
+          {canOpenCheckOutPhoto && (
+            <button
+              type="button"
+              onClick={() => handleOpenAttendancePhoto(attendance, 'checkOut')}
+              className="text-blue-600 hover:text-blue-800 text-xs"
             >
-            Out
-            </a>
+              Out
+            </button>
+          )}
+          {hasBlockedPhotoReference && (
+            <span className="text-xs text-red-600" title="URL/foto non-canonical diblokir">
+              Bukti tidak valid diblokir
+            </span>
+          )}
+          {!canOpenCheckInPhoto && !canOpenCheckOutPhoto && !hasBlockedPhotoReference && (
+            <span className="text-xs text-gray-400">-</span>
           )}
           </div>
           </td>
@@ -1400,7 +1897,7 @@ function AdminDashboard() {
         })
       ) : (
         <tr>
-        <td colSpan="7" className="text-center py-8 text-gray-500">
+        <td colSpan="8" className="text-center py-8 text-gray-500">
         No attendance records for today
         </td>
         </tr>
@@ -1408,6 +1905,13 @@ function AdminDashboard() {
       </tbody>
       </table>
       </div>
+      <AttendanceCorrectionPanel
+        attendanceRecords={[
+          ...previousOpenAttendances,
+          ...todayAttendances,
+        ]}
+        onChanged={handleAttendanceCorrectionChanged}
+      />
       </div>
     )}
 
@@ -1418,7 +1922,9 @@ function AdminDashboard() {
 
       {pendingRegistrations.length > 0 ? (
         <div className="grid gap-4">
-        {pendingRegistrations.map((registration) => (
+        {pendingRegistrations.map((registration) => {
+          const assignment = getRegistrationAssignment(registration);
+          return (
           <div key={registration.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
           <div className="flex justify-between items-start">
           <div className="flex-1">
@@ -1426,6 +1932,15 @@ function AdminDashboard() {
           <p className="text-sm text-gray-600 mt-1">Email: {registration.email}</p>
           <p className="text-sm text-gray-600">Phone: {registration.phoneNumber || registration.phone || 'Not provided'}</p>
           <p className="text-sm text-gray-600">NIK: {registration.nik}</p>
+          <div className={`mt-2 rounded p-2 text-sm ${
+            assignment.valid
+              ? 'border border-blue-200 bg-blue-50 text-blue-900'
+              : 'border border-red-300 bg-red-50 text-red-800'
+          }`}>
+          <p><strong>Kategori:</strong> {assignment.category}</p>
+          <p><strong>Lokasi penugasan:</strong> {assignment.location}</p>
+          <p><strong>Peran:</strong> {assignment.position}</p>
+          </div>
           <p className="text-sm text-gray-600">
           Requested: {formatDate(registration.requestedAt || registration.registeredAt || registration.createdAt)}
           </p>
@@ -1433,7 +1948,7 @@ function AdminDashboard() {
           <div className="flex space-x-2">
           <button
           onClick={() => approveRegistration(registration)}
-          disabled={processingId === registration.id}
+          disabled={processingId === registration.id || !assignment.valid}
           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
           {processingId === registration.id ? 'Processing...' : 'Approve'}
@@ -1448,7 +1963,8 @@ function AdminDashboard() {
           </div>
           </div>
           </div>
-        ))}
+          );
+        })}
         </div>
       ) : (
         <div className="text-center py-8 text-gray-500">
@@ -1542,28 +2058,32 @@ function AdminDashboard() {
           </td>
           <td className="py-3 px-4">
           <div className="flex space-x-2">
-          <button
-          onClick={() => openEditModal(employee)}
-          disabled={processingId === employee.id}
-          className={`px-3 py-1 text-xs rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 ${
-            processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          title="Edit employee data"
-          >
-          Edit
-          </button>
+          {['pending', 'active', 'inactive', 'suspended'].includes(employee.accountStatus) && (
+            <button
+            onClick={() => openEditModal(employee)}
+            disabled={processingId === employee.id}
+            className={`px-3 py-1 text-xs rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 ${
+              processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            title="Edit employee data"
+            >
+            Edit
+            </button>
+          )}
           
-          <button
-          onClick={() => toggleEmployeeStatus(employee)}
-          disabled={processingId === employee.id}
-          className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-            employee.accountStatus === 'active'
-            ? 'bg-red-100 text-red-700 hover:bg-red-200'
-            : 'bg-green-100 text-green-700 hover:bg-green-200'
-          } ${processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-          {employee.accountStatus === 'active' ? 'Suspend' : 'Activate'}
-          </button>
+          {['active', 'suspended'].includes(employee.accountStatus) && (
+            <button
+            onClick={() => toggleEmployeeStatus(employee)}
+            disabled={processingId === employee.id}
+            className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+              employee.accountStatus === 'active'
+              ? 'bg-red-100 text-red-700 hover:bg-red-200'
+              : 'bg-green-100 text-green-700 hover:bg-green-200'
+            } ${processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+            {employee.accountStatus === 'active' ? 'Suspend' : 'Activate'}
+            </button>
+          )}
           
           {/* Only show delete button for suspended employees */}
           {employee.accountStatus === 'suspended' && (
@@ -1781,7 +2301,7 @@ function AdminDashboard() {
           <ul className="text-sm text-blue-700 space-y-1">
             <li>• Reset password untuk karyawan yang lupa password</li>
             <li>• Generate password baru secara otomatis</li>
-            <li>• Kirim password baru via WhatsApp/Email</li>
+            <li>• Serahkan password sementara melalui saluran privat terverifikasi</li>
             <li>• Track riwayat reset password</li>
             <li>• Hanya admin yang dapat reset password</li>
           </ul>
@@ -1801,7 +2321,7 @@ function AdminDashboard() {
                 <div className="mt-2 p-2 bg-white rounded border">
                   <p className="text-xs font-mono">Password Baru: <strong>{passwordResetResult.newPassword}</strong></p>
                   <p className="text-xs text-gray-600 mt-1">
-                    Silakan kirim password ini ke karyawan via WhatsApp atau Email
+                    Salin sekali dan serahkan melalui saluran privat yang sudah memverifikasi identitas penerima.
                   </p>
                 </div>
               )}
@@ -1853,7 +2373,8 @@ function AdminDashboard() {
             <ul className="text-xs text-yellow-700 space-y-1">
               <li>• Password baru akan digenerate secara otomatis</li>
               <li>• Pastikan email karyawan sudah terdaftar di sistem</li>
-              <li>• Kirim password baru ke karyawan dengan aman</li>
+              <li>• Jangan kirim ke grup atau menyimpan tangkapan layar password</li>
+              <li>• Semua sesi lama karyawan dicabut oleh server saat reset</li>
               <li>• Karyawan harus ganti password setelah login pertama</li>
               <li>• Track semua aktivitas reset password</li>
             </ul>
@@ -1870,6 +2391,16 @@ function AdminDashboard() {
     {/* Daily Reminders Tab */}
     {activeTab === 'daily-reminders' && (
       <DailyReminderPanel />
+    )}
+
+    {/* Rotating onsite presence code */}
+    {activeTab === 'onsite-code' && (
+      <OnsitePresenceCode />
+    )}
+
+    {/* Server-authoritative two-admin geofence verification */}
+    {activeTab === 'geofence-verification' && (
+      <GeofenceVerificationPanel />
     )}
 
     {/* Monthly Reports Tab */}
@@ -1924,10 +2455,13 @@ function AdminDashboard() {
                     type="email"
                     required
                     value={editingEmployee.email}
-                    onChange={(e) => setEditingEmployee(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter email address"
+                    readOnly
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
+                    title="Email login harus diubah melalui prosedur administrasi Firebase Authentication."
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Email login dikunci agar profil tidak berbeda dari Firebase Authentication.
+                  </p>
                 </div>
 
                 <div>

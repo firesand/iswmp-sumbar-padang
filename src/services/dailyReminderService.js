@@ -33,6 +33,10 @@ const employeePhone = (employee) =>
 const employeeName = (employee) =>
   employee?.name || employee?.displayName || 'User';
 
+// Ganti placeholder {name} pada custom message
+const personalize = (template, name) =>
+  template.replace(/\{name\}/g, name || 'User');
+
 // ============================================
 // REMINDER CONFIGURATION
 // ============================================
@@ -136,7 +140,7 @@ export const getEmployeeById = async (employeeId) => {
  * @param {string} method - Reminder method
  * @returns {Object} Result object
  */
-export const sendReminderToEmployee = async (employee, method = 'both') => {
+export const sendReminderToEmployee = async (employee, method = 'both', customMessage = '') => {
   const results = {
     employeeId: employee.id,
     employeeName: employeeName(employee),
@@ -148,12 +152,15 @@ export const sendReminderToEmployee = async (employee, method = 'both') => {
   try {
     const wantsWhatsApp = method === 'whatsapp' || method === 'both' || method === 'whatsapp_only';
     const wantsEmail = method === 'email' || method === 'both' || method === 'email_only';
+    const hasCustom = customMessage.trim().length > 0;
 
     // WhatsApp reminder (opens wa.me — not server-side send)
     if (wantsWhatsApp) {
       const phone = employeePhone(employee);
       if (phone) {
-        const link = sendWhatsAppDailyReminder(phone, employeeName(employee));
+        const link = hasCustom
+          ? sendWhatsAppDirect(phone, personalize(customMessage, employeeName(employee)))
+          : sendWhatsAppDailyReminder(phone, employeeName(employee));
         results.whatsapp = {
           success: true,
           link
@@ -169,8 +176,16 @@ export const sendReminderToEmployee = async (employee, method = 'both') => {
     // Email reminder
     if (wantsEmail) {
       if (employee.email) {
-        const emailResult = await sendEmailDailyReminder(employee.email, employeeName(employee));
-        results.email = emailResult;
+        if (hasCustom) {
+          const [emailResult] = await sendBulkEmails(
+            [{ email: employee.email, name: employeeName(employee), department: employee.department }],
+            'Pengumuman',
+            customMessage
+          );
+          results.email = emailResult;
+        } else {
+          results.email = await sendEmailDailyReminder(employee.email, employeeName(employee));
+        }
       } else {
         results.email = {
           success: false,
@@ -201,13 +216,14 @@ export const sendReminderToEmployee = async (employee, method = 'both') => {
  * @param {string} method - Reminder method
  * @returns {Array} Array of result objects
  */
-export const sendBulkReminders = async (employees, method = 'both') => {
+export const sendBulkReminders = async (employees, method = 'both', customMessage = '') => {
   const results = [];
   const whatsappRecipients = [];
   const emailRecipients = [];
 
   const wantsWhatsApp = method === 'whatsapp' || method === 'both' || method === 'whatsapp_only';
   const wantsEmail = method === 'email' || method === 'both' || method === 'email_only';
+  const hasCustom = customMessage.trim().length > 0;
 
   employees.forEach((employee) => {
     if (wantsWhatsApp) {
@@ -231,7 +247,9 @@ export const sendBulkReminders = async (employees, method = 'both') => {
   if (whatsappRecipients.length > 0) {
     const whatsappResults = await sendBulkWhatsApp(
       whatsappRecipients,
-      `Pagi {name}! Jangan lupa check-in hari ini ya.\n\nJam kerja: 08:00-17:00 WIB\nLogin: ${getAppUrl()}`
+      hasCustom
+        ? customMessage
+        : `Pagi {name}! Jangan lupa check-in hari ini ya.\n\nJam kerja: 08:00-17:00 WIB\nLogin: ${getAppUrl()}`
     );
     results.push(...whatsappResults);
   }
@@ -239,8 +257,10 @@ export const sendBulkReminders = async (employees, method = 'both') => {
   if (emailRecipients.length > 0) {
     const emailResults = await sendBulkEmails(
       emailRecipients,
-      'Reminder: Check-in Hari Ini',
-      `Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-17:00 WIB\n\nLogin: ${getAppUrl()}`
+      hasCustom ? 'Pengumuman' : 'Reminder: Check-in Hari Ini',
+      hasCustom
+        ? customMessage
+        : `Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-17:00 WIB\n\nLogin: ${getAppUrl()}`
     );
     results.push(...emailResults);
   }
@@ -334,13 +354,13 @@ export const sendDailyReminders = async (options = {}) => {
     // Send reminders
     if (employees.length === 1) {
       // Single employee
-      const result = await sendReminderToEmployee(employees[0], method);
+      const result = await sendReminderToEmployee(employees[0], method, customMessage);
       results.details.push(result);
       results.successCount = result.success ? 1 : 0;
       results.failedCount = result.success ? 0 : 1;
     } else {
       // Multiple employees
-      const bulkResults = await sendBulkReminders(employees, method);
+      const bulkResults = await sendBulkReminders(employees, method, customMessage);
       results.details = bulkResults;
       results.successCount = bulkResults.filter(r => r.status === 'sent').length;
       results.failedCount = bulkResults.filter(r => r.status === 'failed').length;

@@ -11,6 +11,14 @@ const PROVISIONAL_GEOFENCE = {
   coordinateStatus: 'provisional',
   coordinateSource: 'Google Maps POI',
   verifiedAt: null,
+  verifiedBy: null,
+  verificationReviewedAt: null,
+  verificationReviewedBy: null,
+  verificationEvidence: null,
+  verificationOperator: null,
+  verificationReviewOperator: null,
+  verificationAuditId: null,
+  presenceProofRequired: true,
   catatan: 'Titik kantor kelurahan; verifikasi lapangan sebelum aktivasi geofence',
 };
 
@@ -144,6 +152,14 @@ export const KANTOR_SEED = {
   coordinateSource: 'Konfirmasi user',
   coordinateSourceUrl: 'https://www.google.com/maps?q=-0.861081,100.337068',
   verifiedAt: null,
+  verifiedBy: null,
+  verificationReviewedAt: null,
+  verificationReviewedBy: null,
+  verificationEvidence: null,
+  verificationOperator: null,
+  verificationReviewOperator: null,
+  verificationAuditId: null,
+  presenceProofRequired: true,
   catatan: 'Koordinat dikonfirmasi user (21 Jul 2026); verifikasi lapangan sebelum aktivasi geofence',
 };
 
@@ -152,7 +168,8 @@ export const PROJECT_CONFIG_SEED = {
   namaProyek: 'ISWMP SumBar-Padang',
   jamCheckInDeadline: '08:00',
   timezone: 'Asia/Jakarta',
-  geofenceTransitionMode: true,
+  geofenceTransitionMode: false,
+  maxAttendanceShiftDurationMinutes: 1440,
   defaultKelurahanRadius: 300,
   defaultKantorRadius: 200,
 };

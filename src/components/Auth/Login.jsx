@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import {
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 import ClearCacheButton from '../Common/ClearCacheButton';
@@ -35,22 +39,19 @@ function Login() {
       const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
 
       if (!userDoc.exists()) {
+        await signOut(auth);
         throw new Error('Data user tidak ditemukan');
       }
 
       const userData = userDoc.data();
 
-      if (userData.accountStatus === 'pending') {
-        await auth.signOut();
-        setError('Akun Anda masih menunggu approval admin');
-        setLoading(false);
-        return;
-      }
-
-      if (['suspended', 'resigned', 'rejected'].includes(userData.accountStatus)) {
-        await auth.signOut();
-        setError('Akun Anda tidak aktif');
-        setLoading(false);
+      if (userData.accountStatus !== 'active' || userData.isActive !== true) {
+        await signOut(auth);
+        setError(
+          userData.accountStatus === 'pending'
+            ? 'Akun Anda masih menunggu approval admin'
+            : 'Akun Anda tidak aktif'
+        );
         return;
       }
 

@@ -23,7 +23,7 @@ export const registerEmployee = async (userData) => {
 
     // Create user profile (pending status)
     registrationBatch.set(doc(db, 'users', userId), {
-      email: userData.email,
+      email: userCredential.user.email || userData.email.trim().toLowerCase(),
       name: userData.name,
       nik: userData.nik,
       employeeId: userData.employeeId,
@@ -35,12 +35,7 @@ export const registerEmployee = async (userData) => {
       department: userData.department || '',
       position: userData.position || '',
       phoneNumber: userData.phoneNumber || '',
-      address: userData.address || '',
-      leaveBalance: {
-        annual: 12,
-        used: 0,
-        remaining: 12
-      }
+      address: userData.address || ''
     });
     
     // Create minimal registration request for admin

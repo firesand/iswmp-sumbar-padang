@@ -1,14 +1,71 @@
 // src/components/Admin/AttendanceRecap.jsx
 import React, { useState, useEffect } from 'react';
 import { db } from '../../config/firebase';
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
-import * as XLSX from 'xlsx';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from 'firebase/firestore';
 import { sendMonthlyReportWhatsApp } from '../../services/whatsappService';
 import { sendMonthlyReport } from '../../services/emailService';
+import { isVerifiedAttendance } from '../../utils/attendanceIntegrity';
+import { downloadExcelWorkbook } from '../../utils/excelExport';
+import {
+  getWibDateString,
+} from '../../utils/attendanceTime';
+import {
+  classifyAttendanceCheckout,
+  formatAttendanceWibDateTime,
+  getAttendanceLocationLabel,
+  getCanonicalEarlyLeaveDetails,
+  isCrossDayAttendance,
+} from '../../utils/attendanceDisplay';
+import {
+  attachEffectiveAttendanceCorrection,
+  resolveAttendanceCompletion,
+} from '../../utils/attendanceCorrection';
+
+const attachCorrectionViews = async (records) => {
+  const projectionSnapshots = await Promise.all(
+    records.map((record) => getDoc(doc(
+      db,
+      'attendanceCorrectionEffectiveViews',
+      record.id
+    )))
+  );
+  return records.map((record, index) =>
+    attachEffectiveAttendanceCorrection(
+      record,
+      projectionSnapshots[index].exists()
+        ? projectionSnapshots[index].data()
+        : null
+    )
+  );
+};
+
+const getEffectiveCompletionRecord = (record, completion) => ({
+  ...record,
+  checkOut: completion.isComplete ? completion.checkOut : null,
+  workHours: completion.isComplete ? completion.workHours : 0,
+});
+
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 function AttendanceRecap() {
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [currentWibYear, currentWibMonth] = getWibDateString()
+    .split('-')
+    .map(Number);
+  const [selectedMonth, setSelectedMonth] = useState(currentWibMonth);
+  const [selectedYear, setSelectedYear] = useState(currentWibYear);
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const [viewMode, setViewMode] = useState('summary'); // summary, detailed, calendar, analytics
   const [reportData, setReportData] = useState(null);
@@ -48,8 +105,8 @@ function AttendanceRecap() {
     try {
       const startDate = new Date(selectedYear, selectedMonth - 1, 1);
       const endDate = new Date(selectedYear, selectedMonth, 0);
-      const startDateStr = startDate.toISOString().split('T')[0];
-      const endDateStr = endDate.toISOString().split('T')[0];
+      const startDateStr = formatDateKey(startDate);
+      const endDateStr = formatDateKey(endDate);
 
       // Fetch attendance records
       const attendanceQuery = query(
@@ -60,10 +117,10 @@ function AttendanceRecap() {
       );
 
       const attendanceSnapshot = await getDocs(attendanceQuery);
-      const attendances = attendanceSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const canonicalAttendances = attendanceSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }));
+      const attendances = (await attachCorrectionViews(canonicalAttendances))
+        .filter(isVerifiedAttendance);
 
       // Filter employees by department if needed
       let filteredEmployees = employees;
@@ -97,7 +154,7 @@ function AttendanceRecap() {
       const day = d.getDay();
       if (day !== 0 && day !== 6) { // Exclude weekends
         workingDays++;
-        dateList.push(new Date(d).toISOString().split('T')[0]);
+        dateList.push(formatDateKey(d));
       }
     }
 
@@ -118,6 +175,11 @@ function AttendanceRecap() {
         totalAbsent: 0,
         totalEarlyLeave: 0,
         totalOvertime: 0,
+        totalCrossDayShifts: 0,
+        totalManualCorrections: 0,
+        totalDeviceVerifiedCompletions: 0,
+        totalOpenShifts: 0,
+        invalidCorrectionProjections: 0,
         totalWorkHours: 0,
         attendanceRate: 0,
         punctualityRate: 0,
@@ -131,6 +193,12 @@ function AttendanceRecap() {
       const empId = record.userId;
       if (employeeData[empId]) {
         const emp = employeeData[empId];
+        const completion = resolveAttendanceCompletion(record);
+        const effectiveRecord = getEffectiveCompletionRecord(
+          record,
+          completion
+        );
+        const earlyLeave = getCanonicalEarlyLeaveDetails(record);
         emp.totalPresent++;
 
         if (record.status === 'late') {
@@ -139,30 +207,56 @@ function AttendanceRecap() {
           emp.totalOnTime++;
         }
 
-        // Calculate work hours
-        if (record.checkIn && record.checkOut) {
-          const checkIn = record.checkIn.toDate ? record.checkIn.toDate() : new Date(record.checkIn);
-          const checkOut = record.checkOut.toDate ? record.checkOut.toDate() : new Date(record.checkOut);
-          const hours = (checkOut - checkIn) / (1000 * 60 * 60);
-          emp.totalWorkHours += hours;
+        if (record.correctionProjectionInvalid) {
+          emp.invalidCorrectionProjections++;
+        }
+        if (completion.manualCorrection) {
+          emp.totalManualCorrections++;
+        } else if (completion.deviceVerified) {
+          emp.totalDeviceVerifiedCompletions++;
+        } else {
+          emp.totalOpenShifts++;
+        }
 
-          // Check for early leave (before 17:00)
-          if (checkOut.getHours() < 17) {
-            emp.totalEarlyLeave++;
+        // Only validated completion sources may affect work-hour and
+        // checkout-derived metrics.
+        if (completion.isComplete) {
+          const hours = Number(completion.workHours);
+          if (Number.isFinite(hours) && hours >= 0) {
+            emp.totalWorkHours += hours;
           }
 
-          // Check for overtime (after 18:00)
-          if (checkOut.getHours() >= 18) {
-            emp.totalOvertime++;
+          const checkoutClassification =
+            classifyAttendanceCheckout(effectiveRecord);
+          if (checkoutClassification.crossDay) {
+            // Without a shift schedule, 00:xx cannot be interpreted as early
+            // leave or overtime. Track it separately instead.
+            emp.totalCrossDayShifts++;
+          } else {
+            if (checkoutClassification.overtime) {
+              emp.totalOvertime++;
+            }
           }
+        }
+        if (earlyLeave.isEarlyLeave) {
+          emp.totalEarlyLeave++;
         }
 
         // Store daily record
         emp.dailyRecords[record.date] = {
           checkIn: record.checkIn,
-          checkOut: record.checkOut,
+          checkOut: completion.isComplete ? completion.checkOut : null,
           status: record.status,
-          workHours: record.workHours
+          workHours: completion.isComplete ? completion.workHours : 0,
+          crossDay: completion.isComplete &&
+            isCrossDayAttendance(effectiveRecord),
+          completionSource: completion.completionSource,
+          locationLabel: getAttendanceLocationLabel(record),
+          deviceVerified: completion.deviceVerified,
+          isComplete: completion.isComplete,
+          manualCorrection: completion.manualCorrection,
+          earlyLeave: earlyLeave.isEarlyLeave,
+          earlyLeaveReason: earlyLeave.reason,
         };
       }
     });
@@ -206,8 +300,8 @@ function AttendanceRecap() {
           sum + parseFloat(emp.punctualityRate), 0) / totalEmployees).toFixed(1)
       : 0;
 
-    const startStr = new Date(startDate).toISOString().split('T')[0];
-    const endStr = new Date(endDate).toISOString().split('T')[0];
+    const startStr = formatDateKey(new Date(startDate));
+    const endStr = formatDateKey(new Date(endDate));
 
     return {
       month: getMonthName(selectedMonth),
@@ -225,7 +319,27 @@ function AttendanceRecap() {
         totalLate: Object.values(employeeData).reduce((sum, emp) => sum + emp.totalLate, 0),
         totalOnTime: Object.values(employeeData).reduce((sum, emp) => sum + emp.totalOnTime, 0),
         totalEarlyLeave: Object.values(employeeData).reduce((sum, emp) => sum + emp.totalEarlyLeave, 0),
-        totalOvertime: Object.values(employeeData).reduce((sum, emp) => sum + emp.totalOvertime, 0)
+        totalOvertime: Object.values(employeeData).reduce((sum, emp) => sum + emp.totalOvertime, 0),
+        totalCrossDayShifts: Object.values(employeeData).reduce(
+          (sum, emp) => sum + emp.totalCrossDayShifts,
+          0
+        ),
+        totalManualCorrections: Object.values(employeeData).reduce(
+          (sum, emp) => sum + emp.totalManualCorrections,
+          0
+        ),
+        totalDeviceVerifiedCompletions: Object.values(employeeData).reduce(
+          (sum, emp) => sum + emp.totalDeviceVerifiedCompletions,
+          0
+        ),
+        totalOpenShifts: Object.values(employeeData).reduce(
+          (sum, emp) => sum + emp.totalOpenShifts,
+          0
+        ),
+        invalidCorrectionProjections: Object.values(employeeData).reduce(
+          (sum, emp) => sum + emp.invalidCorrectionProjections,
+          0
+        )
       },
       employees: Object.values(employeeData),
       topPerformers: Object.values(employeeData)
@@ -259,13 +373,11 @@ function AttendanceRecap() {
     }
   };
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (!reportData) {
       alert('Please generate report first');
       return;
     }
-
-    const wb = XLSX.utils.book_new();
 
     // Sheet 1: Executive Summary
     const summaryData = [
@@ -285,20 +397,29 @@ function AttendanceRecap() {
       ['Total Absent', reportData.summary.totalAbsent],
       ['Total On Time', reportData.summary.totalOnTime],
       ['Total Late', reportData.summary.totalLate],
-      ['Total Early Leave', reportData.summary.totalEarlyLeave],
+      ['Canonical Early Leave', reportData.summary.totalEarlyLeave],
       ['Total Overtime', reportData.summary.totalOvertime],
+      ['Cross-Day Shifts (excluded from early/overtime)', reportData.summary.totalCrossDayShifts],
+      ['Device-Verified Completions', reportData.summary.totalDeviceVerifiedCompletions],
+      [
+        'Approved Manual Corrections (not device verified)',
+        reportData.summary.totalManualCorrections
+      ],
+      ['Open Verified Check-Ins', reportData.summary.totalOpenShifts],
+      [
+        'Rejected Invalid Correction Projections',
+        reportData.summary.invalidCorrectionProjections
+      ],
       [''],
       ['Perfect Attendance', reportData.perfectAttendance.length],
       ['Top Performers', reportData.topPerformers.length],
       ['Needs Attention', reportData.needsAttention.length]
     ];
-    const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, ws1, 'Executive Summary');
-
     // Sheet 2: Employee Details
     const employeeHeaders = [
       'Employee ID', 'Name', 'Department', 'Position',
-      'Present', 'Absent', 'On Time', 'Late', 'Early Leave', 'Overtime',
+      'Present', 'Absent', 'On Time', 'Late', 'Early Leave', 'Overtime', 'Cross-Day Shifts',
+      'Device-Verified Completions', 'Manual Corrections', 'Open Shifts',
       'Attendance %', 'Punctuality %', 'Avg Hours/Day', 'Performance'
     ];
     const employeeRows = reportData.employees.map(emp => [
@@ -312,13 +433,16 @@ function AttendanceRecap() {
       emp.totalLate,
       emp.totalEarlyLeave,
       emp.totalOvertime,
+      emp.totalCrossDayShifts,
+      emp.totalDeviceVerifiedCompletions,
+      emp.totalManualCorrections,
+      emp.totalOpenShifts,
       `${emp.attendanceRate}%`,
       `${emp.punctualityRate}%`,
       emp.avgWorkHours,
       emp.performance
     ]);
-    const ws2 = XLSX.utils.aoa_to_sheet([employeeHeaders, ...employeeRows]);
-    XLSX.utils.book_append_sheet(wb, ws2, 'Employee Details');
+    const employeeData = [employeeHeaders, ...employeeRows];
 
     // Sheet 3: Daily Matrix
     const matrixHeaders = ['Employee Name', ...reportData.dateList];
@@ -327,25 +451,101 @@ function AttendanceRecap() {
       reportData.dateList.forEach(date => {
         const record = emp.dailyRecords[date];
         if (record) {
-          row.push(record.status === 'ontime' ? 'P' : 'L');
+          const attendanceCode = record.status === 'ontime' ? 'P' : 'L';
+          const annotations = [];
+          if (record.crossDay) annotations.push('Cross-Day');
+          if (record.manualCorrection) {
+            annotations.push('Manual Correction — not device verified');
+          }
+          if (record.earlyLeave) {
+            annotations.push(
+              `Early Leave — ${record.earlyLeaveReason || 'Reason unavailable'}`
+            );
+          }
+          row.push(annotations.length > 0
+            ? `${attendanceCode} (${annotations.join('; ')})`
+            : attendanceCode);
         } else {
           row.push('A');
         }
       });
       return row;
     });
-    const ws3 = XLSX.utils.aoa_to_sheet([matrixHeaders, ...matrixRows]);
-    XLSX.utils.book_append_sheet(wb, ws3, 'Daily Matrix');
+    const matrixData = [matrixHeaders, ...matrixRows];
+    const completionHeaders = [
+      'Shift Date',
+      'Employee ID',
+      'Employee Name',
+      'Check In (WIB)',
+      'Effective Check Out (WIB)',
+      'Work Hours',
+      'Cross-Day',
+      'Manual Correction',
+      'Completion Source',
+      'Operational Location',
+      'Device Verified',
+      'Early Leave (Canonical)',
+      'Early Leave Reason',
+    ];
+    const completionRows = reportData.employees.flatMap((emp) =>
+      Object.entries(emp.dailyRecords)
+        .sort(([leftDate], [rightDate]) =>
+          leftDate.localeCompare(rightDate)
+        )
+        .map(([date, record]) => [
+          date,
+          emp.employeeId,
+          emp.name,
+          formatAttendanceWibDateTime(record.checkIn, 'N/A'),
+          formatAttendanceWibDateTime(record.checkOut, 'Open'),
+          record.isComplete ? record.workHours : 'N/A',
+          record.isComplete ? record.crossDay ? 'Yes' : 'No' : 'N/A',
+          record.manualCorrection ? 'Yes — administrative' : 'No',
+          record.completionSource,
+          record.locationLabel || '',
+          record.deviceVerified ? 'Yes' : 'No',
+          record.earlyLeave ? 'Yes' : 'No',
+          record.earlyLeave
+            ? record.earlyLeaveReason || 'Reason unavailable'
+            : '',
+        ])
+    );
+    const completionData = [completionHeaders, ...completionRows];
 
     // Save file
     const fileName = `Attendance_Recap_${reportData.month}_${reportData.year}_${reportData.department.replace(/\s+/g, '_')}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '-';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    try {
+      await downloadExcelWorkbook([
+        {
+          data: summaryData,
+          sheet: 'Executive Summary',
+        },
+        {
+          data: employeeData,
+          sheet: 'Employee Details',
+          stickyRowsCount: 1,
+        },
+        {
+          data: matrixData,
+          sheet: 'Daily Matrix',
+          stickyRowsCount: 1,
+          stickyColumnsCount: 1,
+        },
+        {
+          data: completionData,
+          preferredWidths: completionHeaders.map((header) =>
+            header.includes('(WIB)') || header === 'Completion Source'
+              ? 28
+              : 18
+          ),
+          sheet: 'Completion Audit',
+          stickyRowsCount: 1,
+        },
+      ], fileName);
+    } catch (error) {
+      console.error('Error exporting attendance recap:', error);
+      alert('Failed to export attendance recap');
+    }
   };
 
   return (
@@ -522,7 +722,7 @@ function AttendanceRecap() {
               {/* Attendance Breakdown */}
               <div className="bg-white rounded-xl shadow-md p-6">
                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Attendance Breakdown</h3>
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
                   <div className="text-center p-4 bg-green-50 rounded-lg">
                     <p className="text-2xl font-bold text-green-600">{reportData.summary.totalPresent}</p>
                     <p className="text-sm text-gray-600">Total Present</p>
@@ -541,14 +741,50 @@ function AttendanceRecap() {
                   </div>
                   <div className="text-center p-4 bg-orange-50 rounded-lg">
                     <p className="text-2xl font-bold text-orange-600">{reportData.summary.totalEarlyLeave}</p>
-                    <p className="text-sm text-gray-600">Early Leave</p>
+                    <p className="text-sm text-gray-600">Pulang Awal</p>
+                    <p className="mt-1 text-[10px] text-gray-500">
+                      Penanda canonical
+                    </p>
                   </div>
                   <div className="text-center p-4 bg-purple-50 rounded-lg">
                     <p className="text-2xl font-bold text-purple-600">{reportData.summary.totalOvertime}</p>
                     <p className="text-sm text-gray-600">Overtime</p>
                   </div>
+                  <div className="text-center p-4 bg-cyan-50 rounded-lg">
+                    <p className="text-2xl font-bold text-cyan-700">{reportData.summary.totalCrossDayShifts}</p>
+                    <p className="text-sm text-gray-600">Cross-Day</p>
+                    <p className="mt-1 text-[10px] text-gray-500">
+                      Tidak dinilai early/overtime
+                    </p>
+                  </div>
+                  <div className="text-center p-4 bg-amber-50 rounded-lg">
+                    <p className="text-2xl font-bold text-amber-700">
+                      {reportData.summary.totalManualCorrections}
+                    </p>
+                    <p className="text-sm text-gray-600">Manual Correction</p>
+                    <p className="mt-1 text-[10px] text-gray-500">
+                      Administratif; bukan verifikasi perangkat
+                    </p>
+                  </div>
                 </div>
               </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700 shadow-md">
+                <span className="font-medium">
+                  Sumber penyelesaian shift:
+                </span>{' '}
+                {reportData.summary.totalDeviceVerifiedCompletions} perangkat
+                terverifikasi, {reportData.summary.totalManualCorrections}{' '}
+                koreksi administratif, dan {reportData.summary.totalOpenShifts}{' '}
+                check-in masih terbuka.
+              </div>
+
+              {reportData.summary.invalidCorrectionProjections > 0 && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  {reportData.summary.invalidCorrectionProjections} projection
+                  koreksi ditolak karena tidak lolos validasi dan tidak dihitung.
+                </div>
+              )}
 
               {/* Top Performers */}
               {reportData.topPerformers.length > 0 && (
@@ -621,8 +857,10 @@ function AttendanceRecap() {
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Absent</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">On Time</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Late</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Early Leave</th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Pulang Awal</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Overtime</th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Cross-Day</th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Manual</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Attendance %</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Punctuality %</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Performance</th>
@@ -643,6 +881,13 @@ function AttendanceRecap() {
                         <td className="text-center py-3 px-4 text-yellow-600">{emp.totalLate}</td>
                         <td className="text-center py-3 px-4 text-orange-600">{emp.totalEarlyLeave}</td>
                         <td className="text-center py-3 px-4 text-purple-600">{emp.totalOvertime}</td>
+                        <td className="text-center py-3 px-4 text-cyan-700">{emp.totalCrossDayShifts}</td>
+                        <td
+                          className="text-center py-3 px-4 text-amber-700"
+                          title="Koreksi administratif; bukan verifikasi perangkat"
+                        >
+                          {emp.totalManualCorrections}
+                        </td>
                         <td className="text-center py-3 px-4">
                           <span className={`font-medium ${
                             parseFloat(emp.attendanceRate) >= 90 ? 'text-green-600' :
@@ -701,12 +946,29 @@ function AttendanceRecap() {
                           return (
                             <td key={date} className="text-center py-2 px-1">
                               {record ? (
-                                <span className={`inline-block w-6 h-6 rounded ${
-                                  record.status === 'ontime'
-                                    ? 'bg-green-500 text-white'
-                                    : 'bg-yellow-500 text-white'
-                                }`}>
+                                <span
+                                  title={[
+                                    record.crossDay
+                                      ? 'Shift lintas hari; tidak dinilai early leave/overtime'
+                                      : '',
+                                    record.manualCorrection
+                                      ? 'Koreksi administratif; bukan verifikasi perangkat'
+                                      : '',
+                                    record.earlyLeave
+                                      ? `Pulang awal: ${record.earlyLeaveReason || 'Alasan tidak tersedia'}`
+                                      : '',
+                                    `Sumber penyelesaian: ${record.completionSource}`,
+                                  ].filter(Boolean).join('. ')}
+                                  className={`inline-block min-w-6 h-6 rounded px-1 ${
+                                    record.status === 'ontime'
+                                      ? 'bg-green-500 text-white'
+                                      : 'bg-yellow-500 text-white'
+                                  }`}
+                                >
                                   {record.status === 'ontime' ? 'P' : 'L'}
+                                  {record.crossDay ? '↗' : ''}
+                                  {record.manualCorrection ? 'M' : ''}
+                                  {record.earlyLeave ? 'PA' : ''}
                                 </span>
                               ) : (
                                 <span className="inline-block w-6 h-6 rounded bg-red-500 text-white">
@@ -729,6 +991,18 @@ function AttendanceRecap() {
                   </span>
                   <span className="flex items-center">
                     <span className="w-4 h-4 bg-red-500 rounded mr-2"></span> A = Absent
+                  </span>
+                  <span className="flex items-center">
+                    <span className="mr-2 font-medium text-cyan-700">↗</span>
+                    Cross-Day
+                  </span>
+                  <span className="flex items-center">
+                    <span className="mr-2 font-medium text-amber-700">M</span>
+                    Manual correction (bukan verifikasi perangkat)
+                  </span>
+                  <span className="flex items-center">
+                    <span className="mr-2 font-medium text-orange-700">PA</span>
+                    Pulang awal (penanda canonical; arahkan kursor untuk alasan)
                   </span>
                 </div>
               </div>

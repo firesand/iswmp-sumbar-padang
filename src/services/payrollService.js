@@ -14,6 +14,17 @@ import {
 import { db } from './firebase';
 import { sendWhatsAppDirect, notifyApprovalViaWhatsApp } from './whatsappService';
 import { sendApprovalEmail, sendNotification } from './emailService';
+import {
+  getVerifiedWorkHours,
+  isCompletedVerifiedAttendance,
+} from '../utils/attendanceIntegrity';
+
+const formatDateKey = (date) => {
+  const dateYear = date.getFullYear();
+  const dateMonth = String(date.getMonth() + 1).padStart(2, '0');
+  const dateDay = String(date.getDate()).padStart(2, '0');
+  return `${dateYear}-${dateMonth}-${dateDay}`;
+};
 
 // ============================================
 // PAYROLL DATA STRUCTURES
@@ -163,19 +174,27 @@ export const calculateSalary = async (userId, month, year) => {
     const q = query(
       collection(db, 'attendances'),
       where('userId', '==', userId),
-      where('date', '>=', startDate.toISOString().split('T')[0]),
-      where('date', '<=', endDate.toISOString().split('T')[0])
+      where('date', '>=', formatDateKey(startDate)),
+      where('date', '<=', formatDateKey(endDate))
     );
     
     const snapshot = await getDocs(q);
-    const attendances = snapshot.docs.map(doc => doc.data());
+    const attendances = snapshot.docs
+      .map(attendanceDoc => ({
+        id: attendanceDoc.id,
+        ...attendanceDoc.data(),
+      }))
+      .filter(attendance => (
+        attendance.id === `${userId}_${attendance.date}` &&
+        isCompletedVerifiedAttendance(attendance)
+      ));
 
     // Calculate work days and hours
     const workDays = attendances.length;
-    const totalHours = attendances.reduce((sum, att) => {
-      if (att.workHours) return sum + att.workHours;
-      return sum + 8; // Default 8 hours per day
-    }, 0);
+    const totalHours = attendances.reduce(
+      (sum, attendance) => sum + getVerifiedWorkHours(attendance),
+      0
+    );
 
     // Calculate overtime
     const regularHours = workDays * 8;
@@ -470,4 +489,4 @@ export default {
   formatCurrency,
   getMonthName,
   validatePayrollRequest
-}; 
+};

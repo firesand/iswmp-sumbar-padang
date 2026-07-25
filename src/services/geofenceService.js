@@ -13,10 +13,30 @@ export function isGeofenceConfigured(geofence) {
   if (!geofence) return false;
   return (
     geofence.isActive === true &&
+    geofence.coordinateStatus === 'verified' &&
+    geofence.verifiedAt != null &&
+    geofence.verificationReviewedAt != null &&
+    typeof geofence.verificationReviewedBy === 'string' &&
+    geofence.verificationReviewedBy.trim().length >= 3 &&
+    geofence.verificationReviewedBy.trim().toLocaleLowerCase('id-ID') !==
+      String(geofence.verifiedBy || '').trim().toLocaleLowerCase('id-ID') &&
+    typeof geofence.verificationOperator === 'string' &&
+    typeof geofence.verificationReviewOperator === 'string' &&
+    /^[0-9a-f]{64}$/.test(geofence.verificationOperator) &&
+    /^[0-9a-f]{64}$/.test(geofence.verificationReviewOperator) &&
+    geofence.verificationOperator !== geofence.verificationReviewOperator &&
+    typeof geofence.verificationAuditId === 'string' &&
+    geofence.verificationAuditId.length > 0 &&
     geofence.lat != null &&
     geofence.lng != null &&
     Number.isFinite(Number(geofence.lat)) &&
-    Number.isFinite(Number(geofence.lng))
+    Number.isFinite(Number(geofence.lng)) &&
+    Number(geofence.lat) >= -90 &&
+    Number(geofence.lat) <= 90 &&
+    Number(geofence.lng) >= -180 &&
+    Number(geofence.lng) <= 180 &&
+    Number.isFinite(Number(geofence.radius)) &&
+    Number(geofence.radius) > 0
   );
 }
 
@@ -60,15 +80,43 @@ export async function resolveUserGeofence(userData) {
     return getKantorById(userData.kantorId || KANTOR_DEFAULT_ID);
   }
 
-  // Legacy parent role
-  if (userData.role === 'employee') return null;
+  // Akun employee lama hanya boleh memakai geofence jika assignment eksplisit
+  // tersedia. Tanpa assignment, validator akan fail-closed.
+  if (userData.role === 'employee') {
+    if (userData.kelurahanId) return getKelurahanById(userData.kelurahanId);
+    if (userData.kantorId) return getKantorById(userData.kantorId);
+  }
 
   return null;
 }
 
 export async function validateLocationForUser(userData) {
-  const geofence = await resolveUserGeofence(userData);
-  return validateLocationAgainstGeofence(geofence);
+  try {
+    const geofence = await resolveUserGeofence(userData);
+    if (!isGeofenceConfigured(geofence)) {
+      return {
+        isValid: false,
+        transitionMode: false,
+        message: geofence
+          ? `Geofence ${getGeofenceLabel(geofence)} belum aktif dan terverifikasi. Hubungi admin.`
+          : 'Lokasi penugasan belum ditetapkan. Hubungi admin sebelum melakukan absensi.',
+        code: geofence ? 'GEOFENCE_UNVERIFIED' : 'GEOFENCE_UNASSIGNED',
+        geofence: geofence || null,
+        location: null,
+      };
+    }
+    return validateLocationAgainstGeofence(geofence);
+  } catch (error) {
+    return {
+      isValid: false,
+      transitionMode: false,
+      message: 'Konfigurasi lokasi penugasan tidak dapat diverifikasi. Absensi ditolak; hubungi admin.',
+      code: 'GEOFENCE_LOOKUP_FAILED',
+      error: error?.message,
+      geofence: null,
+      location: null,
+    };
+  }
 }
 
 export const OFFICE_STAFF_ROLES = [
