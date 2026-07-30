@@ -508,6 +508,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Raw GPS sample series and their replay digests. This is forensic
+    // evidence about how a fix was produced. A client that could read it would
+    // learn exactly which signal signature the backend accepts, so neither an
+    // employee nor an application administrator may read or write it.
+    match /attendanceGpsTraces/{traceId} {
+      allow read, write: if false;
+    }
+
+    match /attendanceGpsTraceDigests/{digestId} {
+      allow read, write: if false;
+    }
+
     // Retained as an explicit deny for any pre-migration documents. The v3
     // replay flow no longer reads or writes global perceptual band guards.
     match /attendanceProofPerceptualBandGuards/{bandId} {

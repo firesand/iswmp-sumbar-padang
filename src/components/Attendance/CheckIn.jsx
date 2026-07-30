@@ -19,6 +19,14 @@ import {
   validateLocationAgainstGeofence,
 } from '../../utils/geolocation';
 import {
+  captureGpsSignalTrace,
+  describeGpsCaptureStatus,
+} from '../../utils/gpsSignalTrace';
+import {
+  beginDeviceObservation,
+  collectDeviceIntegrity,
+} from '../../utils/deviceIntegrity';
+import {
   ATTENDANCE_TIMEZONE,
   formatWibDate,
   formatWibTime,
@@ -40,6 +48,7 @@ const CheckIn = () => {
   const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [progressHint, setProgressHint] = useState('');
   const [location, setLocation] = useState(null);
   const [photo, setPhoto] = useState(null);
   const [photoError, setPhotoError] = useState(null);
@@ -62,6 +71,7 @@ const CheckIn = () => {
   // Camera refs
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const submittingRef = useRef(false);
 
   const checkEmployeeAttendance = useCallback(async () => {
     if (user) {
@@ -280,6 +290,10 @@ const CheckIn = () => {
   };
 
   const handleCheckIn = async () => {
+    // The disabled attribute only applies after a re-render; a fast double tap
+    // would otherwise start two flows and burn two server challenges.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     setError('');
     setSuccess('');
@@ -361,16 +375,31 @@ const CheckIn = () => {
           mimeType: 'image/jpeg',
         });
         await uploadAttendanceProof(compressed, attendanceChallenge);
+        // Satu perekaman deret sampel GPS, dipakai untuk validasi final dan
+        // dikirim sebagai bukti sinyal ke backend. Bukti OS hanya terisi bila
+        // berjalan di dalam wrapper Android attested.
+        await beginDeviceObservation();
+        setProgressHint(
+          describeGpsCaptureStatus({ elapsedMs: 0, samples: 0 })
+        );
+        const captured = await captureGpsSignalTrace({
+          onProgress: (progress) => setProgressHint(
+            describeGpsCaptureStatus(progress)
+          ),
+        });
+        setProgressHint('Memverifikasi absensi di server…');
+        const deviceIntegrity = await collectDeviceIntegrity();
         const finalLocationValidation =
           attendanceChallenge.verificationMode === VERIFICATION_MODE_LOCATION_PHOTO
             ? await validateLocationAgainstAllowedLocations(
               attendanceChallenge.allowedLocations,
+              { location: captured.location },
             )
             : await validateLocationAgainstGeofence({
               ...attendanceChallenge.geofence,
               nama: attendanceChallenge.geofence?.name,
               isActive: true,
-            });
+            }, { location: captured.location });
         if (
           !finalLocationValidation.isValid ||
           !isValidGpsCoords(finalLocationValidation.location)
@@ -383,7 +412,10 @@ const CheckIn = () => {
         await submitAttendance(
           attendanceChallenge,
           finalLocationValidation.location,
-          presenceCode
+          presenceCode,
+          '',
+          captured.trace,
+          deviceIntegrity
         );
       } catch (uploadError) {
         console.error('Error submitting attendance:', uploadError);
@@ -407,7 +439,9 @@ const CheckIn = () => {
       console.error('Check in error:', error);
       setError('Check in gagal: ' + error.message);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
+      setProgressHint('');
     }
   };
   
@@ -634,6 +668,17 @@ const CheckIn = () => {
           >
             {loading ? 'Memproses...' : '📍 CHECK IN'}
           </button>
+        )}
+
+        {/* Perekaman GPS berlangsung belasan detik; status harus terlihat
+            bergerak agar tidak dibaca sebagai aplikasi macet. */}
+        {loading && progressHint && (
+          <p
+            className="mt-3 text-center text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-3"
+            aria-live="polite"
+          >
+            {progressHint}
+          </p>
         )}
         
         {/* User info */}

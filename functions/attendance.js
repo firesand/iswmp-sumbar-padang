@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const {HttpsError} = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const core = require("./attendance-core");
+const gps = require("./gps-integrity");
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const CHALLENGE_RATE_LIMIT_MS = 15 * 1000;
@@ -28,6 +29,9 @@ const VERIFICATION_MODE_LOCATION_PHOTO = "location_photo";
 const LOCATION_PHOTO_MODE_POLICY_VERSION = 1;
 const MAX_LOCATION_PHOTO_MODE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCATION_PHOTO_PROOF_REASON = "policy_location_photo";
+const GPS_TRACE_COLLECTION = "attendanceGpsTraces";
+const GPS_TRACE_DIGEST_COLLECTION = "attendanceGpsTraceDigests";
+const GPS_TRACE_SCHEMA_VERSION = 1;
 
 function callableError(code, reason, message) {
   return new HttpsError(code, message, {reason});
@@ -64,6 +68,13 @@ function logSecurityEvent(outcome, context, result, error) {
     geofenceFingerprint: securityFingerprint(
         result?.geofence?.id || context.geofenceId,
     ),
+    // Signal quality only. Codes, verdict and score describe how the fix was
+    // produced, never where it was produced.
+    gpsIntegrityMode: context.gpsIntegrity?.mode,
+    gpsIntegrityVerdict: context.gpsIntegrity?.verdict,
+    gpsIntegrityScore: context.gpsIntegrity?.score,
+    gpsIntegritySignals: context.gpsIntegrity?.signals,
+    gpsIntegrityPlatform: context.gpsIntegrity?.platform,
     reason: error?.details?.reason || error?.code,
   };
   Object.keys(event).forEach((key) => {
@@ -92,6 +103,11 @@ function mapCoreError(error) {
     "PHOTO_METADATA",
     "PHOTO_BINDING",
     "PHOTO_STALE",
+    "GPS_TRACE_INVALID",
+    "GPS_TRACE_SCHEMA",
+    "GPS_TRACE_STALE",
+    "DEVICE_INTEGRITY_INVALID",
+    "DEVICE_INTEGRITY_SCHEMA",
   ]);
   const permissionReasons = new Set([
     "ACCOUNT_INACTIVE",
@@ -1528,6 +1544,8 @@ function createAttendanceHandlers(admin) {
               maximumShiftDurationMs: configuredShiftDurationMs,
             },
         );
+        // Surface a misconfigured policy now rather than after the selfie.
+        const gpsPolicy = gps.gpsIntegrityPolicy(config);
         let geofence = null;
         let assignmentSnapshot = null;
         let allowedLocationsPublic = null;
@@ -1811,6 +1829,17 @@ function createAttendanceHandlers(admin) {
               isEarlyLeaveCheckout(nowMs, targetWorkDate),
           targetAttendanceId,
           targetWorkDate,
+          // Advisory collection instructions. A client that ignores them only
+          // produces a weaker trace; the submit-time policy stays authoritative
+          // and is therefore never derived from this response.
+          gpsTracePolicy: {
+            traceVersion: gps.GPS_TRACE_SCHEMA_VERSION,
+            mode: gpsPolicy.mode,
+            minSamples: gps.MIN_TRACE_SAMPLES,
+            minSpanMs: gps.MIN_TRACE_SPAN_MS,
+            maxSamples: gps.MAX_TRACE_SAMPLES,
+            requireMobileDevice: gpsPolicy.requireMobileDevice,
+          },
         };
       });
 
@@ -1831,6 +1860,7 @@ function createAttendanceHandlers(admin) {
         assignment: result.assignment,
         geofence: result.geofence,
         allowedLocations: result.allowedLocations,
+        gpsTracePolicy: result.gpsTracePolicy,
       };
     }, context);
   }
@@ -1849,6 +1879,8 @@ function createAttendanceHandlers(admin) {
           [
             "challengeId",
             "location",
+            "locationTrace",
+            "deviceIntegrity",
             "presenceCode",
             "earlyLeaveReason",
           ],
@@ -1857,6 +1889,17 @@ function createAttendanceHandlers(admin) {
       context.challengeId = challengeId;
       const requestNowMs = Date.now();
       core.normalizeLocation(request.data.location, requestNowMs);
+      // Shape errors fail fast, before any photo download. Freshness is
+      // re-evaluated inside the transaction with the transaction clock.
+      const requestTrace = gps.normalizeLocationTrace(
+          request.data.locationTrace,
+          requestNowMs,
+      );
+      const traceDigest = requestTrace ?
+        gps.canonicalTraceDigest(requestTrace) : null;
+      const deviceIntegrity = gps.normalizeDeviceIntegrity(
+          request.data.deviceIntegrity,
+      );
       const challengeRef = db.collection("attendanceChallenges")
           .doc(challengeId);
       const initialChallengeSnapshot = await challengeRef.get();
@@ -1934,6 +1977,8 @@ function createAttendanceHandlers(admin) {
           .collection(PERCEPTUAL_REPLAY_STATE_COLLECTION)
           .doc(uid);
       const openShiftRef = db.collection("attendanceOpenShifts").doc(uid);
+      const traceDigestRef = traceDigest == null ? null :
+        db.collection(GPS_TRACE_DIGEST_COLLECTION).doc(traceDigest);
 
       const result = await db.runTransaction(async (transaction) => {
         // Re-evaluate all freshness and expiry checks on every transaction
@@ -1943,6 +1988,10 @@ function createAttendanceHandlers(admin) {
         const now = Timestamp.fromMillis(transactionNowMs);
         const location = core.normalizeLocation(
             request.data.location,
+            transactionNowMs,
+        );
+        const trace = gps.normalizeLocationTrace(
+            request.data.locationTrace,
             transactionNowMs,
         );
         const transactionStamp = core.getServerAttendanceStamp(
@@ -2033,6 +2082,7 @@ function createAttendanceHandlers(admin) {
             },
         );
         assertCurrentChallengePolicy(freshChallenge, verificationPolicy);
+        const gpsPolicy = gps.gpsIntegrityPolicy(config);
         const existingShift = openShiftSnapshot.exists ?
           assertOpenShiftState(openShiftSnapshot.data(), uid) : null;
         if (action === "checkIn") {
@@ -2094,11 +2144,44 @@ function createAttendanceHandlers(admin) {
             perceptualReplayReservation.nearReplay,
         );
 
-        const [assignmentLocationSnapshot, attendanceSnapshot] =
+        const [assignmentLocationSnapshot, attendanceSnapshot,
+          traceDigestSnapshot] =
           await Promise.all([
           transaction.get(assignmentResult.ref),
           transaction.get(attendanceRef),
+          traceDigestRef ? transaction.get(traceDigestRef) : null,
         ]);
+
+        // Signal-signature analysis of the GPS trace. The verdict is recorded
+        // either way; only enforce mode turns it into a rejection.
+        const gpsReport = gps.analyzeGpsIntegrity({
+          trace,
+          location,
+          nowMs: transactionNowMs,
+          policy: gpsPolicy,
+          traceReplayed: traceDigestSnapshot?.exists === true,
+          device: deviceIntegrity,
+          // Attestation is decided by the App Check application id the request
+          // arrived on, never by anything the payload claims.
+          appId: expected.appId,
+        });
+        const gpsSummary = gps.gpsIntegritySummary(gpsReport);
+        context.gpsIntegrity = {
+          mode: gpsSummary.mode,
+          verdict: gpsSummary.verdict,
+          score: gpsSummary.score,
+          signals: gpsSummary.signals,
+          platform: gpsSummary.platform,
+        };
+        if (gpsReport.blocking) {
+          throw callableError(
+              "failed-precondition",
+              "GPS_INTEGRITY_REJECTED",
+              "Pola sinyal GPS tidak lolos pemeriksaan integritas. " +
+                "Matikan aplikasi pemalsu lokasi, aktifkan GPS perangkat, " +
+                "lalu ambil lokasi ulang di area terbuka.",
+          );
+        }
         let geofence = null;
         let assignmentSnapshotData = null;
         let presenceVerification;
@@ -2211,6 +2294,10 @@ function createAttendanceHandlers(admin) {
           ...location,
           serverReceivedAt: now,
         };
+        const gpsIntegrityRecord = {
+          ...gpsSummary,
+          evaluatedAt: now,
+        };
         const geofenceSnapshotData = geofence ? {
           id: geofence.id,
           collection: assignmentResult.assignment.collection,
@@ -2283,6 +2370,8 @@ function createAttendanceHandlers(admin) {
             checkOutIsWithinRadius: null,
             checkOutDeviceVerified: null,
             checkOutAssignmentSnapshot: null,
+            gpsIntegrity: gpsIntegrityRecord,
+            checkOutGpsIntegrity: null,
             earlyLeave: null,
             earlyLeaveReason: null,
             earlyLeaveThresholdHourWib: EARLY_LEAVE_THRESHOLD_HOUR_WIB,
@@ -2407,6 +2496,7 @@ function createAttendanceHandlers(admin) {
             "checkOutAssignmentSnapshot": assignmentSnapshotData,
             "checkOutOperationalLocationSnapshot": operationalSnapshotData,
             "checkOutPresenceProof": presenceVerification.proof,
+            "checkOutGpsIntegrity": gpsIntegrityRecord,
             earlyLeave,
             earlyLeaveReason,
             earlyLeaveThresholdHourWib: EARLY_LEAVE_THRESHOLD_HOUR_WIB,
@@ -2456,6 +2546,49 @@ function createAttendanceHandlers(admin) {
             perceptualReplayStateRef,
             perceptualReplayReservation.nextState,
         );
+        if (trace && traceDigestRef) {
+          // Raw samples are kept out of the attendance document: they are
+          // forensic evidence, not part of the presence record, and this
+          // collection can be purged independently.
+          transaction.create(
+              db.collection(GPS_TRACE_COLLECTION)
+                  .doc(`${attendanceId}_${action}`),
+              {
+                schemaVersion: GPS_TRACE_SCHEMA_VERSION,
+                uid,
+                action,
+                attendanceId,
+                challengeId,
+                traceVersion: trace.version,
+                traceDigest,
+                startedAt: Timestamp.fromMillis(trace.startedAt),
+                endedAt: Timestamp.fromMillis(trace.endedAt),
+                samples: trace.samples,
+                environment: trace.environment,
+                analysis: gpsIntegrityRecord,
+                createdAt: now,
+              },
+          );
+          const existingDigest = traceDigestSnapshot?.exists ?
+            traceDigestSnapshot.data() : null;
+          const priorOccurrences =
+            Number.isInteger(existingDigest?.occurrences) ?
+              existingDigest.occurrences : 0;
+          transaction.set(traceDigestRef, {
+            digest: traceDigest,
+            uid: existingDigest?.uid || uid,
+            action: existingDigest?.action || action,
+            attendanceId: existingDigest?.attendanceId || attendanceId,
+            challengeId: existingDigest?.challengeId || challengeId,
+            lastUid: uid,
+            lastAction: action,
+            lastAttendanceId: attendanceId,
+            lastChallengeId: challengeId,
+            occurrences: priorOccurrences + 1,
+            firstSeenAt: existingDigest?.firstSeenAt || now,
+            lastSeenAt: now,
+          });
+        }
         if (presenceVerification.grantRef) {
           transaction.update(presenceVerification.grantRef, {
             status: "consumed",

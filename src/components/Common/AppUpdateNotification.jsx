@@ -2,9 +2,15 @@ import { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import toast, { Toaster } from 'react-hot-toast';
+import {
+  FORCE_RELOAD_TTL_MS,
+  shouldForceReload,
+} from '../../utils/forcedUpdateBroadcast';
 
-// App version - update this when deploying new version
-const APP_VERSION = '1.0.3';
+// App version - update this when deploying new version.
+// Must match what the admin publishes to appConfig/version.latest, otherwise
+// every client keeps prompting for an update it already has.
+const APP_VERSION = '1.0.5';
 
 function AppUpdateNotification({ userId, userRole }) {
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -161,8 +167,7 @@ function AppUpdateNotification({ userId, userRole }) {
 
   // Handle update notifications
   const handleUpdateNotification = (notification) => {
-    if (notification.forced) {
-      // Force refresh immediately
+    if (shouldForceReload(notification, { appVersion: APP_VERSION })) {
       window.location.reload();
       return;
     }
@@ -170,11 +175,13 @@ function AppUpdateNotification({ userId, userRole }) {
     setUpdateAvailable(true);
     setUpdateInfo(notification);
 
-    // Show toast notification
+    // Show toast notification. Never render it as forced: the forced path
+    // either reloaded above or was rejected as stale, same-version, or already
+    // acted on, and a toast with no dismiss button is its own dead end.
     showUpdateNotification({
       type: 'firestore',
       message: notification.message || 'Update available!',
-      forced: notification.forced || false,
+      forced: false,
       features: notification.features || [],
       updateMessage: notification.updateMessage || ''
     });
@@ -289,18 +296,40 @@ function AppUpdateNotification({ userId, userRole }) {
   const forceUpdate = async () => {
     if (userRole !== 'admin') return;
 
+    const confirmed = window.confirm(
+      'Kirim perintah MUAT ULANG PAKSA ke semua pengguna?\n\n' +
+        'Ini bukan tombol untuk menerbitkan versi baru.\n' +
+        'Gunakan hanya jika pengguna benar-benar tertahan di versi lama.\n\n' +
+        'Perintah berhenti sendiri dalam 15 menit.'
+    );
+    if (!confirmed) return;
+
     try {
+      // Broadcast the version the admin actually wants everyone on, not this
+      // browser's build. Clients already running it must ignore the command.
+      const versionDoc = await getDoc(doc(db, 'appConfig', 'version'));
+      const target = versionDoc.exists() ? versionDoc.data().latest : null;
+      if (typeof target !== 'string' || !target) {
+        toast.error('appConfig/version belum berisi "latest". Terbitkan versi dulu.');
+        return;
+      }
+
+      const nowMs = Date.now();
       await setDoc(doc(db, 'notifications', 'global'), {
         active: true,
         type: 'update',
         title: 'Force Update',
-        message: 'Admin has forced an update for all users',
-        timestamp: new Date(),
+        message: `Admin meminta semua pengguna memuat versi ${target}`,
+        timestamp: new Date(nowMs),
+        // Without an expiry this document reloads clients until someone edits
+        // Firestore by hand. It must switch itself off.
+        expiresAt: new Date(nowMs + FORCE_RELOAD_TTL_MS),
+        version: target,
         forced: true,
         action: 'reload'
       });
 
-      toast.success('Force update sent to all users');
+      toast.success(`Perintah muat ulang ke versi ${target} dikirim (15 menit)`);
     } catch (error) {
       console.error('Force update failed:', error);
       toast.error('Failed to send force update');

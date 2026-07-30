@@ -1,0 +1,18 @@
+{
+  "appId": "id.iswmp.padang.attendance",
+  "appName": "Absensi ISWMP Padang",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

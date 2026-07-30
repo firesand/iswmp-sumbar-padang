@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes } from 'firebase/storage';
 import { auth, functions, storage } from '../config/firebase';
 import { isValidGpsCoords } from '../utils/geolocation';
+import { GPS_TRACE_VERSION } from '../utils/gpsSignalTrace';
 const createChallengeCallable = httpsCallable(
   functions,
   'createAttendanceChallenge'
@@ -47,7 +48,8 @@ const friendlyMessages = {
   'already-exists': 'Absensi untuk tahap ini sudah tercatat.',
   'not-found': 'Tantangan absensi tidak ditemukan atau sudah kedaluwarsa.',
   'deadline-exceeded': 'Tantangan absensi sudah kedaluwarsa. Silakan ulangi dari awal.',
-  'resource-exhausted': 'Terlalu banyak percobaan. Tunggu sebentar lalu coba kembali.',
+  'resource-exhausted':
+    'Permintaan absensi terlalu cepat berturut-turut. Tunggu sekitar 15 detik, lalu tekan tombol SATU kali dan tunggu sampai kamera terbuka.',
 };
 
 const reasonMessages = {
@@ -56,7 +58,11 @@ const reasonMessages = {
   PHOTO_REPLAY_INDEX_INVALID: 'Indeks keamanan foto sedang tidak konsisten. Hubungi operator; absensi ditolak demi keamanan.',
   PHOTO_REPLAY_STATE_INVALID: 'Riwayat keamanan foto sedang tidak konsisten. Hubungi operator; absensi ditolak demi keamanan.',
   PHOTO_REPLAY_STATE_OVERFLOW: 'Riwayat keamanan foto mencapai batas aman. Hubungi operator untuk pemeriksaan.',
-  OPEN_SHIFT_EXISTS: 'Shift sebelumnya masih terbuka. Selesaikan check-out shift tersebut terlebih dahulu.',
+  CHALLENGE_RATE_LIMIT:
+    'Tombol absensi ditekan terlalu cepat berturut-turut. Tunggu sekitar 15 detik, lalu tekan SATU kali dan tunggu sampai kamera terbuka.',
+  DAILY_CHALLENGE_LIMIT:
+    'Batas percobaan absensi hari ini sudah tercapai karena tombol tertekan terlalu sering. Hubungi admin untuk penanganan hari ini.',
+  OPEN_SHIFT_EXISTS: 'Shift sebelumnya masih terbuka. Selesaikan check-out shift tersebut terlebih dahulu, baru bisa check-in lagi.',
   OPEN_SHIFT_EXPIRED: 'Shift aktif melewati batas durasi dan memerlukan koreksi administratif.',
   OPEN_SHIFT_STATE_INVALID: 'Status shift aktif tidak konsisten. Hubungi operator.',
   SHIFT_POLICY_INVALID: 'Batas durasi shift belum dikonfigurasi dengan aman oleh operator.',
@@ -86,6 +92,16 @@ const reasonMessages = {
     'Dokumen lokasi penugasan tidak ditemukan. Hubungi admin untuk memperbaiki penugasan.',
   ASSIGNMENT_LOCATION_INVALID:
     'Nama atau data lokasi penugasan tidak valid. Hubungi admin.',
+  GPS_INTEGRITY_REJECTED:
+    'Pola sinyal GPS tidak lolos pemeriksaan integritas. Matikan aplikasi pemalsu lokasi, aktifkan GPS perangkat, lalu ambil lokasi ulang di area terbuka.',
+  GPS_TRACE_INVALID:
+    'Rekaman sinyal GPS tidak valid. Muat ulang aplikasi lalu ulangi absensi.',
+  GPS_TRACE_SCHEMA:
+    'Versi aplikasi belum sesuai dengan pemeriksaan sinyal GPS server. Muat ulang aplikasi.',
+  GPS_TRACE_STALE:
+    'Rekaman sinyal GPS sudah kedaluwarsa. Ambil lokasi ulang lalu kirim kembali.',
+  GPS_INTEGRITY_POLICY_INVALID:
+    'Konfigurasi pemeriksaan sinyal GPS tidak valid. Hubungi operator.',
   EARLY_LEAVE_REASON_REQUIRED:
     'Alasan pulang awal wajib diisi sebelum check-out.',
   EARLY_LEAVE_REASON_INVALID:
@@ -153,6 +169,24 @@ function assertChallenge(challenge, expectedAction, uid) {
     )
   ) {
     throw new Error('Kebijakan pulang awal dari server tidak valid.');
+  }
+
+  // Advisory only: the backend re-derives the authoritative policy at submit
+  // time. A malformed block still means the client and server disagree, so it
+  // is worth refusing before the employee takes a selfie.
+  const tracePolicy = challenge.gpsTracePolicy;
+  if (tracePolicy != null && (
+    typeof tracePolicy !== 'object' ||
+    tracePolicy.traceVersion !== GPS_TRACE_VERSION ||
+    !['observe', 'enforce'].includes(tracePolicy.mode) ||
+    !Number.isInteger(tracePolicy.minSamples) ||
+    tracePolicy.minSamples < 2 ||
+    !Number.isInteger(tracePolicy.minSpanMs) ||
+    tracePolicy.minSpanMs < 1000
+  )) {
+    throw new Error(
+      'Kebijakan pemeriksaan sinyal GPS dari server tidak valid.'
+    );
   }
 
   const verificationMode =
@@ -259,7 +293,9 @@ export async function submitAttendance(
   challenge,
   location,
   presenceCode = '',
-  earlyLeaveReason = ''
+  earlyLeaveReason = '',
+  locationTrace = null,
+  deviceIntegrity = null
 ) {
   const user = auth.currentUser;
   if (!user) {
@@ -304,6 +340,17 @@ export async function submitAttendance(
       source: String(location.source || 'gps'),
     },
   };
+  // Sent verbatim. The backend binds the submitted coordinate to one of these
+  // samples, so re-rounding or trimming here would break that binding.
+  if (locationTrace != null) {
+    payload.locationTrace = locationTrace;
+  }
+  // Only the attested Android wrapper produces this. The backend decides
+  // whether to trust it from the App Check application id, not from its
+  // presence, so a browser build simply never sends it.
+  if (deviceIntegrity != null) {
+    payload.deviceIntegrity = deviceIntegrity;
+  }
   if (normalizedPresenceCode) {
     payload.presenceCode = normalizedPresenceCode;
   }

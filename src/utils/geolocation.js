@@ -180,8 +180,36 @@ const isGeofenceCalibrated = (geofence) =>
   Number.isFinite(Number(geofence.radius)) &&
   Number(geofence.radius) > 0;
 
+/**
+ * Reuse an already-captured fix when the caller has one.
+ *
+ * Signal-trace capture takes tens of seconds and the submitted coordinate must
+ * be one of the traced samples, so the caller captures once and validates the
+ * same fix instead of asking the device again.
+ */
+const resolveLocationForValidation = async (options) => {
+  if (options?.location != null) return options.location;
+  let currentLocation = await getCurrentLocation();
+  if (
+    Number.isFinite(currentLocation?.accuracy) &&
+    currentLocation.accuracy > ACCURACY_THRESHOLD_METERS
+  ) {
+    const retry = await getCurrentLocation();
+    if (
+      Number.isFinite(retry?.accuracy) &&
+      retry.accuracy < currentLocation.accuracy
+    ) {
+      currentLocation = retry;
+    }
+  }
+  return currentLocation;
+};
+
 // Validate user position against assigned geofence
-export const validateLocationAgainstGeofence = async (geofence) => {
+export const validateLocationAgainstGeofence = async (
+  geofence,
+  options = {},
+) => {
   // Fail closed: lokasi penugasan yang belum ada, belum aktif, atau belum
   // memiliki koordinat valid tidak boleh berubah menjadi izin absensi.
   if (!isGeofenceCalibrated(geofence)) {
@@ -205,20 +233,7 @@ export const validateLocationAgainstGeofence = async (geofence) => {
   let currentLocation;
 
   try {
-    currentLocation = await getCurrentLocation();
-
-    if (
-      Number.isFinite(currentLocation?.accuracy) &&
-      currentLocation.accuracy > ACCURACY_THRESHOLD_METERS
-    ) {
-      const retry = await getCurrentLocation();
-      if (
-        Number.isFinite(retry?.accuracy) &&
-        retry.accuracy < currentLocation.accuracy
-      ) {
-        currentLocation = retry;
-      }
-    }
+    currentLocation = await resolveLocationForValidation(options);
   } catch (error) {
     return {
       isValid: false,
@@ -294,6 +309,7 @@ export const validateLocationAgainstGeofence = async (geofence) => {
  */
 export const validateLocationAgainstAllowedLocations = async (
   allowedLocations,
+  options = {},
 ) => {
   const candidates = Array.isArray(allowedLocations)
     ? allowedLocations.filter((entry) =>
@@ -321,19 +337,7 @@ export const validateLocationAgainstAllowedLocations = async (
 
   let currentLocation;
   try {
-    currentLocation = await getCurrentLocation();
-    if (
-      Number.isFinite(currentLocation?.accuracy) &&
-      currentLocation.accuracy > ACCURACY_THRESHOLD_METERS
-    ) {
-      const retry = await getCurrentLocation();
-      if (
-        Number.isFinite(retry?.accuracy) &&
-        retry.accuracy < currentLocation.accuracy
-      ) {
-        currentLocation = retry;
-      }
-    }
+    currentLocation = await resolveLocationForValidation(options);
   } catch (error) {
     return {
       isValid: false,

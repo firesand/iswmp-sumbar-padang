@@ -475,6 +475,59 @@ const firestoreCases = [
     },
   },
   {
+    name: 'client cannot read own GPS signal trace',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: employeeUid, token: {} },
+      path: firestorePath(
+        'attendanceGpsTraces',
+        `${employeeUid}_2026-07-30_checkIn`,
+      ),
+      method: 'get',
+    },
+    resource: { data: { uid: employeeUid, samples: [] } },
+    functionMocks: [firestoreUserMock(employeeUid, activeEmployee)],
+  },
+  {
+    name: 'browser admin cannot read a GPS signal trace',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: adminUid, token: {} },
+      path: firestorePath(
+        'attendanceGpsTraces',
+        `${employeeUid}_2026-07-30_checkIn`,
+      ),
+      method: 'get',
+    },
+    resource: { data: { uid: employeeUid, samples: [] } },
+    functionMocks: [firestoreUserMock(adminUid, activeAdmin)],
+  },
+  {
+    name: 'client cannot forge a GPS signal trace',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: employeeUid, token: {} },
+      path: firestorePath(
+        'attendanceGpsTraces',
+        `${employeeUid}_2026-07-30_checkIn`,
+      ),
+      method: 'create',
+      resource: { data: { uid: employeeUid, samples: [] } },
+    },
+    functionMocks: [firestoreUserMock(employeeUid, activeEmployee)],
+  },
+  {
+    name: 'client cannot read or seed a GPS trace replay digest',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: employeeUid, token: {} },
+      path: firestorePath('attendanceGpsTraceDigests', 'a'.repeat(64)),
+      method: 'get',
+    },
+    resource: { data: { digest: 'a'.repeat(64), occurrences: 1 } },
+    functionMocks: [firestoreUserMock(employeeUid, activeEmployee)],
+  },
+  {
     name: 'client cannot read private same-user perceptual replay state',
     expectation: 'DENY',
     request: {

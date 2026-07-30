@@ -1441,3 +1441,506 @@ test("submit handler re-applies a tightened shift duration policy",
           "open",
       );
     });
+
+/**
+ * A plausible stationary GNSS trace whose final fix is exactly the location the
+ * location-photo request submits, so the trace/location binding holds.
+ */
+function gpsTraceFixture(fixtureNowMs, overrides = {}) {
+  const jitter = [
+    [0.0000112, -0.0000087, 13.4],
+    [-0.0000064, 0.0000131, 9.6],
+    [0.0000027, 0.0000042, 11.8],
+    [-0.0000138, -0.0000029, 8.2],
+    [0.0000073, 0.0000116, 12.1],
+    [-0.0000041, 0.0000058, 10.7],
+    [0.0000094, -0.0000073, 14.3],
+  ];
+  const cadence = [2410, 1830, 2670, 1590, 2280, 1970];
+  const samples = [];
+  let cursor = fixtureNowMs;
+  for (let index = jitter.length - 1; index >= 0; index -= 1) {
+    cursor -= cadence[index % cadence.length];
+  }
+  for (let index = 0; index < jitter.length; index += 1) {
+    const [deltaLat, deltaLng, accuracy] = jitter[index];
+    samples.push({
+      timestamp: cursor,
+      lat: -6.2 + deltaLat,
+      lng: 106.8 + deltaLng,
+      accuracy,
+      altitude: 8.4 + (index % 3) * 0.6,
+      altitudeAccuracy: 6.2,
+      speed: index % 2 === 0 ? 0.17 : null,
+      heading: null,
+    });
+    cursor += cadence[index % cadence.length];
+  }
+  // Final fix is the submitted one.
+  samples.push({
+    timestamp: fixtureNowMs,
+    lat: -6.2,
+    lng: 106.8,
+    accuracy: 10,
+    altitude: 9.1,
+    altitudeAccuracy: 5.8,
+    speed: 0.09,
+    heading: null,
+  });
+  return {
+    version: 1,
+    samples,
+    environment: {
+      geolocationNative: true,
+      positionPrototypeIntact: true,
+      coordsPrototypeIntact: true,
+      automationFlag: false,
+      highAccuracyRequested: true,
+      mobileHint: true,
+      touchPoints: 5,
+      platformHint: "Android",
+      screenClass: "mobile",
+      permissionState: "granted",
+      timeZone: "Asia/Jakarta",
+      clientNow: fixtureNowMs,
+      visibility: "visible",
+      watchDurationMs: 18_000,
+      deliveredSamples: 8,
+      ...(overrides.environment || {}),
+    },
+  };
+}
+
+/** What a consumer mock-location app produces: frozen point, fixed cadence. */
+function mockGpsTraceFixture(fixtureNowMs) {
+  const samples = [];
+  for (let index = 7; index >= 0; index -= 1) {
+    samples.push({
+      timestamp: fixtureNowMs - index * 1000,
+      lat: -6.2,
+      lng: 106.8,
+      accuracy: 10,
+      altitude: null,
+      altitudeAccuracy: null,
+      speed: null,
+      heading: null,
+    });
+  }
+  return {
+    ...gpsTraceFixture(fixtureNowMs),
+    samples,
+  };
+}
+
+async function locationPhotoCheckInFixture(fixtureNowMs, options = {}) {
+  const appId = options.appId || "test-app";
+  const challenge = {
+    ...pendingLocationPhotoCheckInChallenge(fixtureNowMs),
+    appId,
+  };
+  const documents = {
+    [`attendanceChallenges/${locationPhotoCheckInChallengeId}`]: challenge,
+    [`attendanceChallengeLocks/${uid}_checkIn`]:
+      matchingCheckInChallengeLock(challenge),
+    [`users/${uid}`]: activeEmployee(),
+    "projectConfig/default": locationPhotoPolicy(
+        fixtureNowMs,
+        options.policyOverrides || {},
+    ),
+    "kelurahan/kel-test": provisionalAssignmentLocation,
+    ...(options.extraDocuments || {}),
+  };
+  const bucket = await fakePhotoBucket(fixtureNowMs, {
+    challengeId: locationPhotoCheckInChallengeId,
+    action: "checkIn",
+  });
+  const fake = fakeAdmin(documents, bucket);
+  const handlers = createAttendanceHandlers(fake.admin);
+  const request = locationPhotoRequest(
+      fixtureNowMs,
+      "checkIn",
+      locationPhotoCheckInChallengeId,
+  );
+  request.app = {appId, alreadyConsumed: false};
+  if (options.trace !== undefined) {
+    request.data.locationTrace = options.trace;
+  }
+  if (options.deviceIntegrity !== undefined) {
+    request.data.deviceIntegrity = options.deviceIntegrity;
+  }
+  return {fake, handlers, request};
+}
+
+test("check-in records a passing GPS trace, its digest and the raw samples",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {trace: gpsTraceFixture(fixtureNowMs)},
+      );
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      );
+      assert.equal(result.success, true);
+
+      const attendanceId = `${uid}_2027-01-01`;
+      const recorded = fake.data(`attendances/${attendanceId}`);
+      assert.equal(recorded.gpsIntegrity.verdict, "pass",
+          (recorded.gpsIntegrity.signals || []).join(","));
+      assert.equal(recorded.gpsIntegrity.mode, "observe");
+      assert.equal(recorded.gpsIntegrity.enforced, false);
+      assert.equal(recorded.gpsIntegrity.score, 100);
+      assert.deepEqual(recorded.gpsIntegrity.signals, []);
+      assert.equal(recorded.checkOutGpsIntegrity, null);
+      assert.match(recorded.gpsIntegrity.traceDigest, /^[0-9a-f]{64}$/);
+      // The summary must never carry coordinates.
+      assert.equal(recorded.gpsIntegrity.metrics.distinctSampleCount, 8);
+      assert.ok(!("lat" in recorded.gpsIntegrity.metrics));
+
+      const trace = fake.data(`attendanceGpsTraces/${attendanceId}_checkIn`);
+      assert.equal(trace.uid, uid);
+      assert.equal(trace.action, "checkIn");
+      assert.equal(trace.samples.length, 8);
+      assert.equal(trace.traceDigest, recorded.gpsIntegrity.traceDigest);
+      assert.equal(trace.environment.platformHint, "Android");
+
+      const digest = fake.data(
+          `attendanceGpsTraceDigests/${trace.traceDigest}`,
+      );
+      assert.equal(digest.occurrences, 1);
+      assert.equal(digest.attendanceId, attendanceId);
+    });
+
+test("observe mode records a mock-location signature without blocking",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {trace: mockGpsTraceFixture(fixtureNowMs)},
+      );
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      );
+      assert.equal(result.success, true);
+
+      const recorded = fake.data(`attendances/${uid}_2027-01-01`);
+      assert.equal(recorded.gpsIntegrity.verdict, "reject");
+      assert.equal(recorded.gpsIntegrity.enforced, false);
+      assert.ok(recorded.gpsIntegrity.signals.includes("COORDINATE_FROZEN"));
+      assert.ok(recorded.gpsIntegrity.signals.includes("ACCURACY_CONSTANT"));
+    });
+
+test("enforce mode blocks a mock-location signature and writes nothing",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {
+            trace: mockGpsTraceFixture(fixtureNowMs),
+            policyOverrides: {
+              gpsIntegrityMode: "enforce",
+              gpsIntegrityPolicyVersion: 1,
+            },
+          },
+      );
+
+      await assert.rejects(
+          withFixedNow(
+              fixtureNowMs,
+              () => handlers.submitAttendance(request),
+          ),
+          (error) => error?.details?.reason === "GPS_INTEGRITY_REJECTED",
+      );
+      assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+      assert.equal(fake.paths("attendanceGpsTraces/").length, 0);
+      assert.equal(fake.paths("attendanceProofHashes/").length, 0);
+    });
+
+test("enforce mode accepts a plausible trace from the same fixture",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {
+            trace: gpsTraceFixture(fixtureNowMs),
+            policyOverrides: {
+              gpsIntegrityMode: "enforce",
+              gpsIntegrityPolicyVersion: 1,
+            },
+          },
+      );
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      );
+      assert.equal(result.success, true);
+      const recorded = fake.data(`attendances/${uid}_2027-01-01`);
+      assert.equal(recorded.gpsIntegrity.mode, "enforce");
+      assert.equal(recorded.gpsIntegrity.verdict, "pass");
+    });
+
+test("enforce mode rejects a submission that carries no trace at all",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {
+            policyOverrides: {
+              gpsIntegrityMode: "enforce",
+              gpsIntegrityPolicyVersion: 1,
+            },
+          },
+      );
+
+      await assert.rejects(
+          withFixedNow(
+              fixtureNowMs,
+              () => handlers.submitAttendance(request),
+          ),
+          (error) => error?.details?.reason === "GPS_INTEGRITY_REJECTED",
+      );
+      assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+    });
+
+test("observe mode still accepts a client that predates trace collection",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+      );
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      );
+      assert.equal(result.success, true);
+      const recorded = fake.data(`attendances/${uid}_2027-01-01`);
+      assert.deepEqual(recorded.gpsIntegrity.signals, ["TRACE_MISSING"]);
+      assert.equal(recorded.gpsIntegrity.enforced, false);
+      assert.equal(recorded.gpsIntegrity.traceDigest, null);
+      assert.equal(fake.paths("attendanceGpsTraces/").length, 0);
+    });
+
+test("a replayed trace digest is rejected under enforce", async () => {
+  const fixtureNowMs = nowMs;
+  const trace = gpsTraceFixture(fixtureNowMs);
+  const {handlers: probeHandlers, request: probeRequest, fake: probeFake} =
+    await locationPhotoCheckInFixture(fixtureNowMs, {trace});
+  await withFixedNow(
+      fixtureNowMs,
+      () => probeHandlers.submitAttendance(probeRequest),
+  );
+  const digest = probeFake
+      .data(`attendances/${uid}_2027-01-01`).gpsIntegrity.traceDigest;
+
+  const {fake, handlers, request} = await locationPhotoCheckInFixture(
+      fixtureNowMs,
+      {
+        trace,
+        policyOverrides: {
+          gpsIntegrityMode: "enforce",
+          gpsIntegrityPolicyVersion: 1,
+        },
+        extraDocuments: {
+          [`attendanceGpsTraceDigests/${digest}`]: {
+            digest,
+            uid,
+            action: "checkIn",
+            attendanceId: `${uid}_2026-12-30`,
+            occurrences: 1,
+          },
+        },
+      },
+  );
+
+  await assert.rejects(
+      withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      ),
+      (error) => error?.details?.reason === "GPS_INTEGRITY_REJECTED",
+  );
+  assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+});
+
+test("a malformed trace is rejected before the photo is fetched", async () => {
+  const fixtureNowMs = nowMs;
+  const broken = gpsTraceFixture(fixtureNowMs);
+  broken.samples[2].accuracy = 0;
+  const {fake, handlers, request} = await locationPhotoCheckInFixture(
+      fixtureNowMs,
+      {trace: broken},
+  );
+
+  await assert.rejects(
+      withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      ),
+      (error) => error?.details?.reason === "GPS_TRACE_INVALID",
+  );
+  assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+});
+
+test("a misconfigured GPS policy fails closed at challenge time", async () => {
+  const fixtureNowMs = nowMs;
+  const {handlers} = await locationPhotoCheckInFixture(fixtureNowMs, {
+    policyOverrides: {gpsIntegrityMode: "enforce"},
+  });
+
+  await assert.rejects(
+      withFixedNow(
+          fixtureNowMs,
+          () => handlers.createAttendanceChallenge({
+            auth: {uid},
+            app: {appId: "test-app", alreadyConsumed: false},
+            data: {action: "checkIn"},
+          }),
+      ),
+      (error) => error?.details?.reason === "GPS_INTEGRITY_POLICY_INVALID",
+  );
+});
+
+const ATTESTED_ANDROID_APP_ID = "1:1234567890:android:abcdef0123456789";
+
+function androidDeviceEvidence(overrides = {}) {
+  return {
+    version: 1,
+    platform: "android",
+    appVersion: "1.0.0",
+    mockLocationDetected: false,
+    mockLocationCapableAppsDetected: false,
+    developerOptionsEnabled: false,
+    locationProvider: "gps",
+    satellitesUsed: 12,
+    ...overrides,
+  };
+}
+
+test("attested android check-in is recorded as device-attested", async () => {
+  const fixtureNowMs = nowMs;
+  const {fake, handlers, request} = await locationPhotoCheckInFixture(
+      fixtureNowMs,
+      {
+        trace: gpsTraceFixture(fixtureNowMs),
+        deviceIntegrity: androidDeviceEvidence(),
+        appId: ATTESTED_ANDROID_APP_ID,
+        policyOverrides: {
+          gpsIntegrityMode: "enforce",
+          gpsIntegrityPolicyVersion: 1,
+          gpsIntegrityAttestedAppIds: [ATTESTED_ANDROID_APP_ID],
+        },
+      },
+  );
+
+  const result = await withFixedNow(
+      fixtureNowMs,
+      () => handlers.submitAttendance(request),
+  );
+  assert.equal(result.success, true);
+  const recorded = fake.data(`attendances/${uid}_2027-01-01`).gpsIntegrity;
+  assert.equal(recorded.deviceAttested, true);
+  assert.equal(recorded.platform, "android-app");
+  assert.equal(recorded.verdict, "pass", (recorded.signals || []).join(","));
+  assert.equal(recorded.device.satellitesUsed, 12);
+});
+
+test("the OS mock-location flag blocks an attested check-in", async () => {
+  const fixtureNowMs = nowMs;
+  const {fake, handlers, request} = await locationPhotoCheckInFixture(
+      fixtureNowMs,
+      {
+        trace: gpsTraceFixture(fixtureNowMs),
+        deviceIntegrity: androidDeviceEvidence({mockLocationDetected: true}),
+        appId: ATTESTED_ANDROID_APP_ID,
+        policyOverrides: {
+          gpsIntegrityMode: "enforce",
+          gpsIntegrityPolicyVersion: 1,
+          gpsIntegrityAttestedAppIds: [ATTESTED_ANDROID_APP_ID],
+        },
+      },
+  );
+
+  await assert.rejects(
+      withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      ),
+      (error) => error?.details?.reason === "GPS_INTEGRITY_REJECTED",
+  );
+  assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+});
+
+test("a web client cannot claim android device evidence", async () => {
+  const fixtureNowMs = nowMs;
+  const {fake, handlers, request} = await locationPhotoCheckInFixture(
+      fixtureNowMs,
+      {
+        trace: gpsTraceFixture(fixtureNowMs),
+        deviceIntegrity: androidDeviceEvidence(),
+        policyOverrides: {
+          gpsIntegrityMode: "enforce",
+          gpsIntegrityPolicyVersion: 1,
+          gpsIntegrityAttestedAppIds: [ATTESTED_ANDROID_APP_ID],
+        },
+      },
+  );
+
+  await assert.rejects(
+      withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      ),
+      (error) => error?.details?.reason === "GPS_INTEGRITY_REJECTED",
+  );
+  assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+});
+
+test("malformed device evidence is refused before the photo is fetched",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {
+            trace: gpsTraceFixture(fixtureNowMs),
+            deviceIntegrity: androidDeviceEvidence({platform: "ios"}),
+            appId: ATTESTED_ANDROID_APP_ID,
+          },
+      );
+
+      await assert.rejects(
+          withFixedNow(
+              fixtureNowMs,
+              () => handlers.submitAttendance(request),
+          ),
+          (error) => error?.details?.reason === "DEVICE_INTEGRITY_INVALID",
+      );
+      assert.equal(fake.data(`attendances/${uid}_2027-01-01`), undefined);
+    });
+
+test("observe mode records an unattested device claim without blocking",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const {fake, handlers, request} = await locationPhotoCheckInFixture(
+          fixtureNowMs,
+          {
+            trace: gpsTraceFixture(fixtureNowMs),
+            deviceIntegrity: androidDeviceEvidence(),
+          },
+      );
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(request),
+      );
+      assert.equal(result.success, true);
+      const recorded = fake.data(`attendances/${uid}_2027-01-01`).gpsIntegrity;
+      assert.equal(recorded.platform, "unattested-claim");
+      assert.ok(recorded.signals.includes("DEVICE_INTEGRITY_UNVERIFIED"));
+      assert.equal(recorded.enforced, false);
+    });

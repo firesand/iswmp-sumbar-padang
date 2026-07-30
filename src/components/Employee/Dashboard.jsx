@@ -19,6 +19,15 @@ import {
   validateLocationAgainstGeofence,
 } from '../../utils/geolocation';
 import {
+  captureGpsSignalTrace,
+  describeGpsCaptureStatus,
+  describeGpsTraceProgress,
+} from '../../utils/gpsSignalTrace';
+import {
+  beginDeviceObservation,
+  collectDeviceIntegrity,
+} from '../../utils/deviceIntegrity';
+import {
   ATTENDANCE_TIMEZONE,
   formatWibDate,
   formatWibTime,
@@ -96,6 +105,8 @@ function EmployeeDashboard() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const attendanceChallengeRef = useRef(null);
+  const startingAttendanceRef = useRef(false);
 
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -457,6 +468,13 @@ function EmployeeDashboard() {
   // Check In/Out: fail-closed validation, then request a short-lived backend
   // challenge before the camera may produce an attendance proof.
   const startCamera = async (type) => {
+    // Preparing an attendance flow reads GPS twice before the camera opens,
+    // which can take tens of seconds on a weak fix. A React state flag updates
+    // too late to stop a second tap in the same tick, so the guard is a ref:
+    // every extra tap used to burn a server challenge and trip the 15-second
+    // rate limit, which is what field users experienced as "gagal absen".
+    if (startingAttendanceRef.current) return;
+    startingAttendanceRef.current = true;
     setCheckType(type);
     setPendingCheckType(type);
     setLocationError('');
@@ -485,13 +503,18 @@ function EmployeeDashboard() {
       }
 
       // Check permission/accuracy before consuming a server challenge.
+      setCameraHint('Membaca lokasi GPS… mohon tunggu, jangan tekan ulang.');
       const isLocationValid = await validateLocation();
       if (!isLocationValid) return;
 
       const action = type === 'out' ? 'checkOut' : 'checkIn';
+      setCameraHint('Meminta izin absensi dari server…');
       const challenge = await createAttendanceChallenge(action);
+      setCameraHint('Memeriksa lokasi terhadap titik yang diizinkan…');
       const challengeLocationValid = await validateLocation(challenge);
       if (!challengeLocationValid) return;
+      setCameraHint('Menyiapkan kamera…');
+      attendanceChallengeRef.current = challenge;
       setAttendanceChallenge(challenge);
       setShowCamera(true);
 
@@ -502,9 +525,12 @@ function EmployeeDashboard() {
       console.error('Unable to start attendance flow:', error);
       const message = getAttendanceErrorMessage(error);
       setLocationError(message);
+      attendanceChallengeRef.current = null;
       setAttendanceChallenge(null);
+      setShowCamera(false);
       alert(message);
     } finally {
+      startingAttendanceRef.current = false;
       setCameraStarting(false);
     }
   };
@@ -552,7 +578,7 @@ function EmployeeDashboard() {
   };
 
   const processAttendancePhoto = async (blobOrFile) => {
-    const challenge = attendanceChallenge;
+    const challenge = attendanceChallengeRef.current || attendanceChallenge;
     if (!challenge) {
       throw new Error('Tantangan absensi tidak tersedia. Silakan ulangi dari awal.');
     }
@@ -582,19 +608,36 @@ function EmployeeDashboard() {
 
       // GPS final diambil setelah upload agar capturedAt tetap segar saat
       // backend memvalidasi batas umur lokasi (jaringan lambat tidak memakai
-      // koordinat lama).
-      setCameraHint('Mengambil dan memverifikasi lokasi final…');
+      // koordinat lama). Perekaman deret sampel memerlukan belasan detik dan
+      // titik yang dikirim wajib salah satu sampel itu, jadi lokasi diambil
+      // sekali lalu dipakai ulang untuk validasi.
+      setCameraHint(describeGpsCaptureStatus({ elapsedMs: 0, samples: 0 }));
+      // Di dalam wrapper Android attested, listener OS berjalan pada jendela
+      // yang sama dengan perekaman deret sampel. Di browser ini no-op.
+      await beginDeviceObservation();
+      const captured = await captureGpsSignalTrace({
+        onProgress: (progress) => setCameraHint(
+          describeGpsCaptureStatus(progress)
+        ),
+      });
+      const deviceIntegrity = await collectDeviceIntegrity();
+      setCameraHint(
+        `Memverifikasi lokasi final… ${describeGpsTraceProgress(
+          captured.trace
+        )}`
+      );
       const freshValidation = await (async () => {
         if (challenge.verificationMode === VERIFICATION_MODE_LOCATION_PHOTO) {
           return validateLocationAgainstAllowedLocations(
             challenge.allowedLocations,
+            { location: captured.location },
           );
         }
         return validateLocationAgainstGeofence({
           ...challenge.geofence,
           nama: challenge.geofence?.name,
           isActive: true,
-        });
+        }, { location: captured.location });
       })();
       if (!freshValidation.isValid || !isValidGpsCoords(freshValidation.location)) {
         const message = freshValidation.message || 'GPS wajib aktif untuk absensi.';
@@ -609,7 +652,9 @@ function EmployeeDashboard() {
         challenge,
         freshValidation.location,
         presenceCode,
-        normalizedEarlyLeaveReason
+        normalizedEarlyLeaveReason,
+        captured.trace,
+        deviceIntegrity
       );
       const canonicalAttendance = await refreshCanonicalAttendance(result);
 
@@ -657,6 +702,7 @@ function EmployeeDashboard() {
     setShowCamera(false);
     setCheckType('');
     setPendingCheckType('');
+    attendanceChallengeRef.current = null;
     setAttendanceChallenge(null);
     setPresenceCode('');
     setEarlyLeaveReason('');
@@ -668,6 +714,13 @@ function EmployeeDashboard() {
 
   // Enhanced capture photo with better error handling
   const capturePhoto = async () => {
+    if (!attendanceChallengeRef.current && !attendanceChallenge) {
+      alert(
+        'Tantangan absensi tidak tersedia. Tutup kamera, muat ulang halaman, lalu mulai check-in dari awal.'
+      );
+      stopCamera();
+      return;
+    }
     if (!videoRef.current || !canvasRef.current) {
       console.error('Video or canvas reference not available');
       alert('Camera tidak siap. Silakan coba lagi.');
@@ -981,13 +1034,22 @@ function EmployeeDashboard() {
     ) : activeAttendance ? (
       <button
       onClick={() => startCamera('out')}
-      className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
+      disabled={cameraStarting}
+      className={`flex-1 text-white py-3 px-6 rounded-lg font-semibold transition-colors flex items-center justify-center space-x-2 ${
+        cameraStarting
+          ? 'bg-gray-400 cursor-not-allowed'
+          : 'bg-blue-600 hover:bg-blue-700'
+      }`}
       >
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
       </svg>
       <span>
-        {activeShiftIsOvernight ? 'Check Out Shift Kemarin' : 'Check Out'}
+        {cameraStarting
+          ? 'Menyiapkan absensi…'
+          : activeShiftIsOvernight
+            ? 'Check Out Shift Kemarin'
+            : 'Check Out'}
       </span>
       </button>
     ) : expiredOpenAttendance ? (
@@ -1003,12 +1065,19 @@ function EmployeeDashboard() {
     ) : !todayAttendance ? (
       <button
       onClick={() => startCamera('in')}
-      className="flex-1 bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+      disabled={cameraStarting}
+      className={`flex-1 text-white py-3 px-6 rounded-lg font-semibold transition-colors flex items-center justify-center space-x-2 ${
+        cameraStarting
+          ? 'bg-gray-400 cursor-not-allowed'
+          : 'bg-green-600 hover:bg-green-700'
+      }`}
       >
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
       </svg>
-      <span>Check In Hari Ini</span>
+      <span>
+        {cameraStarting ? 'Menyiapkan absensi…' : 'Check In Hari Ini'}
+      </span>
       </button>
     ) : !isAttendanceWorkflowEligible(todayAttendance) ? (
       <div className="flex-1 rounded-lg border border-red-200 bg-red-50 px-6 py-3 text-center text-red-800">
@@ -1032,6 +1101,24 @@ function EmployeeDashboard() {
       </div>
     )}
     </div>
+
+    {/* Reading GPS can take tens of seconds. Without a moving status the user
+        reads the screen as frozen and taps again, which burns a server
+        challenge and trips the rate limit. */}
+    {cameraStarting && (
+      <div
+        className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-center text-blue-900"
+        aria-live="polite"
+      >
+        <p className="text-sm font-medium">
+          {cameraHint || 'Mohon tunggu…'}
+        </p>
+        <p className="mt-1 text-xs text-blue-700">
+          Jangan menekan tombol berulang kali. Proses ini bisa memakan waktu
+          sampai setengah menit bila sinyal GPS lemah.
+        </p>
+      </div>
+    )}
 
     {locationValidation?.transitionMode && (
       <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -1224,6 +1311,7 @@ function EmployeeDashboard() {
         disabled={
           isProcessing ||
           cameraStarting ||
+          !attendanceChallenge ||
           (attendanceChallenge?.presenceProofRequired === true &&
             !/^\d{6}$/.test(presenceCode)) ||
           (attendanceChallenge?.action === 'checkOut' &&

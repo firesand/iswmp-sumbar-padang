@@ -18,10 +18,13 @@ liveness manusia.
 - Seluruh geofence seed tetap provisional/nonaktif. Aktivasi hanya boleh lewat
   dua callable App Check di panel admin: satu akun admin aplikasi mengusulkan
   hasil survei dan akun admin aplikasi lain mereview dari lokasi fisik.
-- Baseline lokal terbaru: 60 backend unit/handler test, 25 frontend/helper test,
-  dan 104 semantic security-rules test lulus. Uji
+- Baseline lokal terbaru: 115 backend unit/handler test, 43 frontend/helper
+  test, dan 108 semantic security-rules test lulus. Uji
   transaksi replay konkuren di Firestore Emulator merupakan gate terpisah;
   perintahnya ada di bawah.
+- Pemeriksaan sidik sinyal GPS aktif dengan mode default `observe`: verdict dan
+  sinyal dicatat pada setiap absensi, tetapi belum menolak. Lihat bagian
+  “Pemeriksaan sidik sinyal GPS” sebelum memindahkannya ke `enforce`.
 - Hosting menerapkan CSP script ketat: script hanya dari origin aplikasi dan
   endpoint reCAPTCHA yang diizinkan, tanpa `unsafe-inline`/`unsafe-eval`, serta
   memblokir script attribute. Ini mengurangi jalur injeksi script, bukan bukti
@@ -497,6 +500,157 @@ mencampur mode check-in/check-out atau mengedit attendance/pointer mentah.
 Smoke verifier di bagian berikut sengaja hanya menerima alur kuat
 `geofence_onsite`. Record `location_photo_only` tidak boleh dipakai sebagai
 evidence smoke `PASS` atau sebagai alasan mengaktifkan enforcement App Check.
+
+## Pemeriksaan sidik sinyal GPS
+
+Satu koordinat browser adalah klaim; aplikasi pemalsu lokasi menghasilkan klaim
+seperti itu tanpa biaya. Karena itu klien sekarang merekam **deret fix** selama
+10–30 detik lewat `watchPosition`, ditambah snapshot lingkungan geolocation, dan
+**server** yang menilai polanya. Modul otoritatifnya `functions/gps-integrity.js`
+dan bersifat pure sehingga setiap verdict dapat diuji.
+
+Ini menaikkan biaya kecurangan dan menghasilkan bukti yang dapat ditinjau. Ia
+**bukan** attestation sensor dan bukan bukti kehadiran fisik. Seluruh input tetap
+berasal dari perangkat klien.
+
+### Yang diperiksa server
+
+| Sinyal | Severity | Dasar |
+| --- | --- | --- |
+| `GEOLOCATION_API_PATCHED` | critical | `getCurrentPosition`/`watchPosition`/`clearWatch` bukan fungsi native, atau prototype `GeolocationPosition`/`GeolocationCoordinates` tidak utuh |
+| `AUTOMATION_FLAG` | critical | `navigator.webdriver` true |
+| `TRACE_LOCATION_MISMATCH` | critical | koordinat yang dikirim bukan salah satu sampel dalam deret |
+| `COORDINATE_FROZEN` | critical | seluruh fix identik bit-per-bit; GNSS nyata tidak pernah begitu |
+| `IMPLAUSIBLE_SPEED` | critical | perpindahan antar fix melebihi 55 m/s setelah margin akurasi kedua fix |
+| `TRACE_REPLAYED` | critical | digest deret sampel sudah pernah tercatat |
+| `TRACE_MISSING` | critical | tidak ada deret sampel sama sekali |
+| `NON_MOBILE_DEVICE` | critical bila `requireMobileDevice`, selain itu medium | `userAgentData.mobile` false atau kelas layar desktop |
+| `TRACE_TOO_SHORT` | high | kurang dari 6 sampel unik atau rentang di bawah 8 detik |
+| `COORDINATE_REPETITION` | high | koordinat unik kurang dari separuh jumlah sampel |
+| `ACCURACY_CONSTANT` | high | seluruh sampel melaporkan akurasi yang sama persis |
+| `STATIONARY_SPREAD_ZERO` | high | sebaran posisi di bawah 0,5 m padahal akurasi ≥ 3 m |
+| `LINEAR_TRACK_SIMULATION` | high | bearing hampir sama, kecepatan hampir konstan — ciri simulasi rute |
+| `TRACE_STALE` | high | deret berakhir lebih dari 3 menit sebelum waktu server |
+| `SAMPLE_INTERVAL_UNIFORM` | medium | deviasi interval di bawah 15 ms — cadence mesin, bukan penerima GNSS |
+| `SPREAD_ACCURACY_INCONSISTENT` | medium | sebaran lebih dari 6× akurasi median |
+| `ALTITUDE_CONSTANT_ZERO` | medium | altitude persis 0 pada semua sampel |
+| `CLIENT_CLOCK_SKEW` | medium | jam klien menyimpang lebih dari 120 detik |
+| `ALTITUDE_ABSENT`, `SPEED_HEADING_ABSENT`, `ACCURACY_ROUND_VALUES`, `PERMISSION_STATE_UNEXPECTED`, `TIME_ZONE_MISMATCH`, `PAGE_HIDDEN` | low | indikator lemah; hanya menurunkan skor |
+
+Sinyal berikut hanya relevan bila client Android attested dipakai; lihat
+`docs/android-attested-client.md`:
+
+| Sinyal | Severity | Dasar |
+| --- | --- | --- |
+| `OS_MOCK_LOCATION` | critical | Android sendiri melaporkan fix berasal dari mock provider (`Location.isMock`) |
+| `DEVICE_INTEGRITY_UNVERIFIED` | critical | payload mengaku punya bukti OS padahal application id App Check bukan aplikasi attested |
+| `DEVICE_EVIDENCE_MISSING` | critical | application id attested tetapi bukti OS tidak dikirim — bukti yang ditekan, bukan browser |
+| `ATTESTED_APP_REQUIRED` | critical | `gpsIntegrityRequireAttestedApp` aktif dan request bukan dari aplikasi attested |
+| `MOCK_LOCATION_APPS_PRESENT` | medium | ada aplikasi terinstal yang meminta `ACCESS_MOCK_LOCATION` (best effort; lemah di Android 11+) |
+| `DEVELOPER_OPTIONS_ENABLED`, `NO_SATELLITES_USED` | low | konteks tambahan |
+
+Attestation **tidak** ditentukan oleh isi payload, melainkan oleh application id
+App Check tempat request benar-benar datang, dicocokkan ke
+`gpsIntegrityAttestedAppIds`.
+
+Skor mulai dari 100 dan dikurangi 100/25/10/3 per severity. Verdict `reject`
+bila ada sinyal critical atau skor di bawah `gpsIntegrityMinimumScore`;
+`suspect` bila ada sinyal high/medium; sisanya `pass`. Verdict dihitung
+**terlepas dari mode**, sehingga observe menghasilkan bukti yang persis
+dibutuhkan keputusan enforce.
+
+Sampel yang dikirim ulang pada satu timestamp dikumpulkan menjadi satu fix
+sebelum analisis; browser yang mengulang fix dari cache tidak boleh dihukum
+sebagai jitter palsu.
+
+### Penyimpanan bukti
+
+- Ringkasan per aksi ada di `attendances/{id}.gpsIntegrity` dan
+  `checkOutGpsIntegrity`: versi policy, mode, verdict, skor, daftar sinyal,
+  digest, dan metrik. **Tanpa koordinat** — metrik hanya bicara kualitas sinyal.
+- Sampel mentah ada di `attendanceGpsTraces/{attendanceId}_{action}`, digest
+  replay di `attendanceGpsTraceDigests/{sha256}`. Keduanya ditolak total oleh
+  Firestore rules, termasuk untuk admin browser: klien yang bisa membacanya akan
+  belajar sidik sinyal mana yang diterima backend.
+- Telemetry structured log menambah `gpsIntegrityMode`, `gpsIntegrityVerdict`,
+  `gpsIntegrityScore`, dan `gpsIntegritySignals`. Tetap tanpa koordinat, UID
+  mentah, atau hash foto.
+
+### Konfigurasi
+
+Field pada `projectConfig/default`:
+
+- `gpsIntegrityMode` — `observe` atau `enforce`
+- `gpsIntegrityPolicyVersion` — wajib `1`
+- `gpsIntegrityMinimumScore` — bilangan bulat 0..100, default 50
+- `gpsIntegrityRequireMobileDevice` — boolean, default false
+- `gpsIntegrityAttestedAppIds` — array application id Android (`1:…:android:…`),
+  maksimum 5, tanpa duplikat
+- `gpsIntegrityRequireAttestedApp` — boolean, default false; gagal tertutup bila
+  diaktifkan sementara allowlist masih kosong
+
+Ketiadaan seluruh field berarti `observe`; kontrol baru tidak boleh mulai
+menolak absensi hanya karena dideploy. Sebaliknya konfigurasi **separuh jalan
+atau tidak valid gagal tertutup** dengan `GPS_INTEGRITY_POLICY_INVALID` pada
+challenge maupun submit, supaya policy setengah tertulis tidak pernah diam-diam
+menurunkan enforcement.
+
+```sh
+# Preview; tidak menulis. Sekaligus meringkas hasil observasi 7 hari terakhir.
+npm run configure:gps-integrity -- --mode=observe
+
+# Terapkan observe.
+npm run configure:gps-integrity -- --mode=observe --apply
+
+# Enforce hanya setelah bukti observasi ditinjau.
+npm run configure:gps-integrity -- \
+  --mode=enforce \
+  --apply \
+  --confirm-enforcement=GPS_OBSERVATION_REVIEWED
+```
+
+Skrip menolak enforce selama bukti belum mendukung: kurang dari `--min-observed`
+(default 10) evaluasi bertrace, **ada** evaluasi `TRACE_MISSING` (artinya rilis
+client perekam sinyal belum dipakai semua orang dan enforce akan memblokir
+mereka), atau masih ada verdict `reject` yang belum diselidiki. Yang terakhir
+dapat dilewati dengan `--accept-pending-rejects` bila memang itu tujuannya.
+
+### Urutan rollout
+
+1. Deploy Functions lebih dulu, lalu client. `submitAttendance` menolak field
+   payload asing, jadi client baru yang mengirim `locationTrace` ke backend lama
+   gagal `UNEXPECTED_FIELD`. Backend baru tetap menerima client lama, dan
+   mencatatnya sebagai `TRACE_MISSING`.
+2. Jalankan observe beberapa hari kerja. Minta seluruh pengguna me-refresh, lalu
+   pastikan `TRACE_MISSING` turun ke nol pada ringkasan skrip.
+3. Tinjau distribusi sinyal terhadap perangkat nyata. Ambang di atas dikalibrasi
+   dari perilaku GNSS, bukan dari korpus perangkat proyek ini; ponsel dengan GPS
+   lemah atau browser yang tidak mengekspos altitude wajar memunculkan sinyal
+   low/medium. Jangan menaikkan `minimumScore` sebelum melihat datanya.
+4. Baru kemudian pindah ke `enforce`. Pertimbangkan
+   `gpsIntegrityRequireMobileDevice` hanya setelah dipastikan tidak ada pegawai
+   yang memang harus absen dari desktop.
+
+### Residual risk yang tetap ada
+
+- **Chrome DevTools sensor override** menghasilkan objek `GeolocationPosition`
+  asli. Ia lolos pemeriksaan prototype dan native-code. Yang menangkapnya adalah
+  pola deret: override manual biasanya menghasilkan koordinat beku dan akurasi
+  konstan. Override yang di-script dengan noise realistis dapat lolos.
+- Perangkat root/emulator dengan mock provider yang mensimulasikan jitter,
+  altitude, dan cadence tidak beraturan tetap dapat lolos.
+- Seluruh bukti lingkungan dilaporkan klien dan dapat dipalsukan pada perangkat
+  yang dikuasai penyerang.
+- Record `location_photo` yang lulus pemeriksaan ini **tetap**
+  `verificationStatus: location_photo_only`, `transitionMode: true`,
+  `isWithinRadius: null`, `deviceVerified: false`. Jangan menamainya Verified v2,
+  “onsite terverifikasi”, atau memasukkannya ke metrik yang mensyaratkan
+  `isCompletedVerifiedAttendance`. Pemeriksaan sinyal menilai bagaimana fix
+  dihasilkan, bukan apakah lokasinya sudah diaudit dua petugas.
+
+Lompatan kelas berikutnya bukan ambang yang lebih ketat, melainkan sinyal
+mock-location tingkat OS dan device attestation. Itu memerlukan aplikasi
+Android; lihat `docs/android-attested-client.md`.
 
 ## Smoke test perangkat nyata
 
