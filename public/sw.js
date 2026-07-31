@@ -1,11 +1,11 @@
 // Service Worker for ISWMP Padang
-// Version: 1.0.5-updateloopfix - forced-update broadcast guards
+// Version: 1.0.6-correctionvisibility - 30-day correction scan, named proposals
 //
 // The cache name must change on every release: `activate` deletes every cache
 // that does not match it, which is what evicts the previous bundle from a
 // device whose user will never clear a cache by hand.
 
-const CACHE_NAME = 'iswmp-padang-v1.0.5-updateloopfix';
+const CACHE_NAME = 'iswmp-padang-v1.0.6-correctionvisibility';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -16,7 +16,7 @@ const urlsToCache = [
 
 // Reported to clients in SW_ACTIVATED messages; keep it in step with the cache
 // name above, or the logs name a release that was never deployed.
-const APP_VERSION = '1.0.5-updateloopfix';
+const APP_VERSION = '1.0.6-correctionvisibility';
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {

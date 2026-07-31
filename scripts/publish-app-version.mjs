@@ -146,6 +146,16 @@ const RELEASE_NOTES = {
       'Tombol kirim perintah muat ulang meminta konfirmasi',
     ],
   },
+  '1.0.6': {
+    updateMessage:
+      'Koreksi lupa check-out kini menjangkau 30 hari ke belakang dan ' +
+      'selalu menampilkan nama pegawai.',
+    features: [
+      'Shift lama yang belum di-check-out tidak lagi hilang setelah 7 hari',
+      'Kartu proposal koreksi menampilkan nama, bukan kode acak',
+      'Peringatan jelas bila identitas pegawai tidak terbaca',
+    ],
+  },
 };
 
 const notes = RELEASE_NOTES[sourceVersion];

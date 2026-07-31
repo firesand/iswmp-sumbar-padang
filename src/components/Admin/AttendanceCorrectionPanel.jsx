@@ -27,7 +27,10 @@ import {
   getWibDateString,
 } from '../../utils/attendanceTime';
 
-const CORRECTION_LOOKBACK_DAYS = 7;
+// A 7-day window silently hid two shifts left open since 23 Jul 2026: they fell
+// out of the scan and could never be selected again, even though the backend
+// still accepts the correction. Stale shifts must stay visible, not disappear.
+const CORRECTION_LOOKBACK_DAYS = 30;
 const DEFAULT_MAX_SHIFT_MINUTES = 1440;
 const SUGGESTED_CHECKOUT_HOUR_WIB = 17;
 
@@ -221,8 +224,33 @@ export default function AttendanceCorrectionPanel({
         getDoc(doc(db, 'attendanceCorrectionDecisions', proposal.id))
       )
     );
+
+    // Read the name from the attendance record itself. Resolving it against the
+    // still-eligible list breaks the moment a shift is closed another way — the
+    // employee simply checks out — and the reviewer is then asked to approve a
+    // change to attendance data identified only by a raw document id.
+    const attendanceIds = [...new Set(
+      proposalRows
+        .map((proposal) => proposal.attendanceId)
+        .filter((attendanceId) => typeof attendanceId === 'string')
+    )];
+    const attendanceSnapshots = await Promise.all(
+      attendanceIds.map((attendanceId) =>
+        getDoc(doc(db, 'attendances', attendanceId))
+      )
+    );
+    const nameByAttendanceId = new Map(
+      attendanceIds.map((attendanceId, index) => [
+        attendanceId,
+        attendanceSnapshots[index].exists()
+          ? attendanceSnapshots[index].data().userName || null
+          : null,
+      ])
+    );
+
     setProposals(proposalRows.map((proposal, index) => ({
       ...proposal,
+      resolvedUserName: nameByAttendanceId.get(proposal.attendanceId) || null,
       decision: decisionSnapshots[index].exists()
         ? decisionSnapshots[index].data()
         : null,
@@ -449,15 +477,25 @@ export default function AttendanceCorrectionPanel({
           const candidate = eligibleRecords.find(
             (record) => record.id === proposal.attendanceId
           );
+          const displayName = candidate?.userName ||
+            proposal.resolvedUserName ||
+            proposal.userName ||
+            null;
           return (
             <article key={proposal.id} className="rounded-lg border border-orange-100 bg-white p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p className="font-medium text-gray-900">
-                    {candidate?.userName ||
-                      proposal.userName ||
-                      proposal.attendanceId}
+                    {displayName || 'Nama pegawai tidak terbaca'}
                   </p>
+                  {!displayName && (
+                    // Never let a raw document id pose as a name: the reviewer
+                    // must be able to tell that identification failed.
+                    <p className="text-xs font-medium text-red-700">
+                      Jangan setujui sebelum identitasnya dipastikan · ID{' '}
+                      {proposal.attendanceId}
+                    </p>
+                  )}
                   <p className="text-xs text-gray-600">
                     {proposal.workDate || candidate?.date || '—'}
                     {' · '}Checkout {formatWibDate(proposal.requestedCheckOut, {

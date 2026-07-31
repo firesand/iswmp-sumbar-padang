@@ -2,7 +2,7 @@
 
 > **Tujuan file ini:** Jembatan informasi keberlanjutan pembahasan proyek.  
 > Baca file ini di awal setiap sesi baru agar konteks tidak hilang.  
-> **Update terakhir:** 30 Juli 2026
+> **Update terakhir:** 31 Juli 2026
 >
 > **Catatan keamanan 23 Juli 2026:** status dan prosedur absensi pada bagian
 > lama di bawah telah digantikan oleh `docs/attendance-security-deployment.md`.
@@ -47,7 +47,7 @@
 | **Tujuan aplikasi** | Crosscheck kehadiran tim proyek (bukan HR/payroll) |
 | **Developer** | Hikmahtiar Studio |
 | **Status saat ini** | Firebase live; jalur absensi v2 fail-closed, menunggu verifikasi geofence dan uji perangkat nyata |
-| **Status deploy 31 Jul 2026** | ✅ Lengkap. Rules/indexes/storage + 11 Functions dideploy 01:05 WIB; hosting **1.0.5** dideploy 01:31 WIB; `appConfig/version.latest` = **1.0.5** diterbitkan 01:33 WIB (`forcedUpdate: false`). Bundle live `assets/index-D1XPv96s.js`, service worker `iswmp-padang-v1.0.5-updateloopfix`, `notifications/global` non-aktif. **Belum di-commit ke git.** Urutan deploy wajib tetap Functions → Hosting (client baru ke backend lama gagal `UNEXPECTED_FIELD`) |
+| **Status deploy 31 Jul 2026** | Rules/indexes/storage + 11 Functions dideploy 01:05 WIB. Hosting **1.0.6** dideploy 11:55 WIB — bundle `assets/index-gUa1DUGa.js`, service worker `iswmp-padang-v1.0.6-correctionvisibility`. `appConfig/version.latest` = **1.0.6** diterbitkan 12:49 WIB (`forcedUpdate: false`). `notifications/global` non-aktif. Commit terakhir `844cd83` (1.0.5); perubahan 1.0.6 **belum di-commit**. Urutan deploy wajib tetap Functions → Hosting |
 | **Workspace lokal** | `~/iswmp-sumbar-padang/` |
 | **Repo ISWMP (GitHub)** | https://github.com/firesand/iswmp-sumbar-padang |
 | **Firebase project** | https://console.firebase.google.com/project/iswmp-sumbar-padang |
@@ -238,9 +238,17 @@ Rincian penolakan — **seluruhnya di tahap challenge, tidak satu pun di submit*
 
 ### Utang operasional yang masih terbuka
 
-- **Per 31 Jul 2026: 4 shift berstatus `open`** (dari 10 sebelumnya; 6 sudah
-  ditutup lewat koreksi administratif). 2 di antaranya sudah punya proposal
-  menunggu approval admin kedua.
+- **Per 31 Jul 2026 siang: 2 shift lama berstatus `open`**, keduanya dari
+  **23 Juli** — F. Ar Razy dan Ririn deflina. Sisanya shift hari berjalan yang
+  normal. Abdul Azis (30 Jul) selesai lewat koreksi; Dewi Anggraini (30 Jul)
+  selesai sendiri dengan check-out lintas tengah malam pukul 06:45 WIB.
+- Dua shift 23 Juli itu sempat **tidak bisa diperbaiki lewat panel sama sekali**
+  karena pemindaian hanya 7 hari. Sejak 1.0.6 jendelanya 30 hari, jadi keduanya
+  muncul kembali di dropdown dan bisa diajukan koreksinya.
+- **Pelajaran:** proposal yang masih `pending` **bukan** bukti absensinya belum
+  beres. Pegawai bisa menutup sendiri shift-nya, dan proposalnya jadi yatim.
+  Selalu periksa `attendanceOpenShifts` / `attendances.checkOut`, bukan antrian
+  proposal.
 - Enam shift dari 28–29 Juli sudah melewati batas 24 jam sehingga hanya bisa
   diselesaikan lewat proposal + approval koreksi missing-checkout oleh dua admin
   berbeda. Jangan mengedit `attendances` atau `attendanceOpenShifts` langsung.
@@ -491,7 +499,8 @@ ISWMP SumBar-Padang
 | Kontrak bukti perangkat OS (`deviceIntegrity`) | ✅ backend + jembatan klien; ⬜ aplikasi Android belum dibuat |
 | Plugin native mock-location + provider App Check native | 🟡 sumber siap di `android-client/`; ⬜ belum di-generate/registrasi |
 | Anti tekan-ganda tombol absensi + indikator progres | ✅ dideploy 31 Jul 2026 |
-| Versi client 1.0.5 (`APP_VERSION` + `CACHE_NAME` service worker) | ✅ dideploy dan diterbitkan ke `appConfig/version` |
+| Versi client 1.0.6 (`APP_VERSION` + `CACHE_NAME` service worker) | ✅ dideploy; ⬜ `appConfig/version.latest` masih 1.0.5 |
+| Jendela koreksi missing-checkout 30 hari + nama pada kartu proposal | ✅ dideploy 1.0.6 |
 | Pengaman broadcast muat ulang paksa (`src/utils/forcedUpdateBroadcast.js`) | ✅ 17 test, dideploy 1.0.5 |
 | Structured telemetry tersanitasi + CSP script ketat | ✅ |
 | App Check Functions | ✅ diwajibkan callable |
@@ -673,3 +682,4 @@ npm run seed                             # dry-run saja; tidak menulis Firestore
 | 0.9.1 | 2026-07-30 | Diagnosis produksi: perbaikan tekan-ganda tombol absensi, indikator progres, versi client 1.0.4, koreksi fakta jumlah admin aktif |
 | 1.0.0 | 2026-07-31 | Deploy 1.0.4 (rules + 11 Functions + hosting); jalur geofence dicoret permanen atas keputusan user; `location_photo` jadi mode tetap; audit rantai koreksi terbukti false alarm |
 | 1.0.1 | 2026-07-31 | Insiden loop reload akibat tombol "Force"; pengaman broadcast + skrip `stop-forced-update-loop.mjs` dan `publish-app-version.mjs`; hosting 1.0.5 |
+| 1.0.2 | 2026-07-31 | 1.0.6: jendela koreksi 7→30 hari, nama pegawai pada kartu proposal; tabrakan `configUpdateTime` didokumentasikan |
