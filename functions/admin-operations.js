@@ -325,9 +325,14 @@ function createAdminHandlers(admin) {
           );
         }
         const employee = core.assertActiveEmployee(employeeSnapshot.data());
-        const assignment = core.resolveAssignment(employee);
-        if (assignment.collection !== geofenceType ||
-            assignment.id !== geofenceId) {
+        // Field staff may be issued a code at either their kelurahan or the
+        // project kantor, so membership in the full candidate set is
+        // checked rather than equality with only the primary assignment.
+        const assignment = core.resolveAssignmentCandidates(employee)
+            .find((candidate) =>
+              candidate.collection === geofenceType &&
+              candidate.id === geofenceId);
+        if (!assignment) {
           throw callableError(
               "failed-precondition",
               "EMPLOYEE_ASSIGNMENT_MISMATCH",

@@ -18,6 +18,11 @@ const MAX_IMAGE_SIDE = 4096;
 const MAX_IMAGE_PIXELS = 12 * 1000 * 1000;
 const ALLOWED_LOCATION_SOURCES = new Set(["gps-high", "gps-low"]);
 const ALLOWED_ACTIONS = new Set(["checkIn", "checkOut"]);
+// The single project office ("kantor proyek") field staff may additionally
+// check in/out at, alongside their assigned kelurahan. Kept in sync with the
+// client's KANTOR_DEFAULT_ID in src/services/geofenceService.js.
+const PROJECT_OFFICE_KANTOR_ID = "kantor-padang-kota";
+const ASSIGNMENT_CHOICE_COLLECTIONS = new Set(["kelurahan", "kantor"]);
 const PRESENCE_CODE_PERIOD_SECONDS = 60;
 const PERCEPTUAL_HASH_HEX_LENGTH = 36;
 const PERCEPTUAL_HASH_BAND_COUNT = 7;
@@ -321,6 +326,36 @@ function resolveAssignment(user) {
     return {collection: "kantor", id: user.kantorId};
   }
   fail("ASSIGNMENT_MISSING", "Penugasan pengguna belum dikonfigurasi.");
+}
+
+/**
+ * Ordered list of geofences a user is allowed to check in/out at. The first
+ * entry is always the canonical `resolveAssignment` result (used whenever no
+ * explicit choice is made). Field staff normally work out of their assigned
+ * kelurahan, but may also attend the project office in person (e.g. training,
+ * coordination meetings), so the project kantor is appended as a second,
+ * equally-enforced candidate. Office staff are unaffected: their only
+ * candidate remains their own kantor.
+ */
+function resolveAssignmentCandidates(user) {
+  const primary = resolveAssignment(user);
+  if (primary.collection === "kelurahan") {
+    return [primary, {collection: "kantor", id: PROJECT_OFFICE_KANTOR_ID}];
+  }
+  return [primary];
+}
+
+/**
+ * Validates an optional client-supplied choice of which candidate geofence
+ * (from resolveAssignmentCandidates) a check-in/out challenge should target.
+ * Returns null when the caller wants the default (primary) assignment.
+ */
+function assertAssignmentChoice(value) {
+  if (value == null) return null;
+  if (!ASSIGNMENT_CHOICE_COLLECTIONS.has(value)) {
+    fail("ASSIGNMENT_CHOICE_INVALID", "Pilihan lokasi absensi tidak valid.");
+  }
+  return value;
 }
 
 const MAX_OPERATIONAL_LOCATIONS = 8;
@@ -961,6 +996,7 @@ module.exports = {
   MAX_OPERATIONAL_LOCATIONS,
   MAX_OPERATIONAL_LOCATION_WINDOW_MS,
   MIN_OPERATIONAL_RADIUS_METERS,
+  PROJECT_OFFICE_KANTOR_ID,
   PERCEPTUAL_HASH_HEX_LENGTH,
   PERCEPTUAL_HASH_VIEW_COUNT,
   PERCEPTUAL_HASH_VERSION,
@@ -972,6 +1008,7 @@ module.exports = {
   WIB_TIME_ZONE,
   assertAction,
   assertActiveEmployee,
+  assertAssignmentChoice,
   assertChallengeId,
   assertGeofenceAudit,
   calculateDistanceMeters,
@@ -995,6 +1032,7 @@ module.exports = {
   presenceCounter,
   publicOperationalLocation,
   resolveAssignment,
+  resolveAssignmentCandidates,
   validatePhotoBytes,
   validatePhotoMetadata,
   verifyPresenceCode,

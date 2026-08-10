@@ -304,6 +304,43 @@ export const validateLocationAgainstGeofence = async (
 };
 
 /**
+ * Pick which of several calibrated candidate geofences a location falls
+ * inside (a within-radius match always wins over an out-of-radius one, even
+ * if nearer); falls back to the nearest candidate when none contain the
+ * point, or null when there are no calibrated candidates. Used to choose
+ * which permanent geofence a check-in/out request should target when a user
+ * has more than one candidate — e.g. field staff who may attend either their
+ * kelurahan or the project kantor. This only selects a candidate; the
+ * backend independently re-verifies the chosen geofence and distance.
+ */
+export const pickMatchingGeofence = (candidates, location) => {
+  const calibrated = (Array.isArray(candidates) ? candidates : [])
+    .filter(isGeofenceCalibrated);
+  if (calibrated.length === 0 || !isValidGpsCoords(location)) return null;
+
+  let best = null;
+  for (const geofence of calibrated) {
+    const distance = calculateDistance(
+      location.lat,
+      location.lng,
+      Number(geofence.lat),
+      Number(geofence.lng)
+    );
+    const uncertaintyAdjustedDistance =
+      distance + Number(location.accuracy || 0);
+    const withinRadius = uncertaintyAdjustedDistance <= (geofence.radius ?? 300);
+    if (
+      !best ||
+      (withinRadius && !best.withinRadius) ||
+      (withinRadius === best.withinRadius && distance < best.distance)
+    ) {
+      best = { geofence, distance: Math.round(distance), withinRadius };
+    }
+  }
+  return best;
+};
+
+/**
  * Validate GPS against one or more operator-declared operational locations
  * used by location_photo mode (assignment + temporary venues).
  */

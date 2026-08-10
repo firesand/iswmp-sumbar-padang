@@ -1,7 +1,10 @@
 // Multi-geofence service — ISWMP SumBar-Padang
 import { doc, getDoc, collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { validateLocationAgainstGeofence } from '../utils/geolocation';
+import {
+  pickMatchingGeofence,
+  validateLocationAgainstGeofence,
+} from '../utils/geolocation';
 
 const KANTOR_DEFAULT_ID = 'kantor-padang-kota';
 
@@ -88,6 +91,61 @@ export async function resolveUserGeofence(userData) {
   }
 
   return null;
+}
+
+/**
+ * Ordered list of geofences a user may check in/out at, tagged with which
+ * collection each came from. Field staff normally attend their kelurahan,
+ * but may also attend the project kantor in person, so it is appended as a
+ * second candidate. Office staff are unaffected — their only candidate
+ * remains their own kantor. Mirrors functions/attendance-core.js's
+ * resolveAssignmentCandidates.
+ */
+export async function resolveUserGeofenceCandidates(userData) {
+  if (!userData || userData.role === 'admin') return [];
+
+  if (userData.role === 'field_staff' || userData.assignmentType === 'kelurahan') {
+    const [kelurahan, kantor] = await Promise.all([
+      getKelurahanById(userData.kelurahanId),
+      getKantorById(KANTOR_DEFAULT_ID),
+    ]);
+    return [
+      kelurahan ? { ...kelurahan, collection: 'kelurahan' } : null,
+      kantor ? { ...kantor, collection: 'kantor' } : null,
+    ].filter(Boolean);
+  }
+
+  if (userData.role === 'office_staff' || userData.assignmentType === 'kantor') {
+    const kantor = await getKantorById(userData.kantorId || KANTOR_DEFAULT_ID);
+    return kantor ? [{ ...kantor, collection: 'kantor' }] : [];
+  }
+
+  if (userData.role === 'employee') {
+    const geofence = await resolveUserGeofence(userData);
+    if (!geofence) return [];
+    return [{ ...geofence, collection: userData.kelurahanId ? 'kelurahan' : 'kantor' }];
+  }
+
+  return [];
+}
+
+/**
+ * Best-effort pick of which candidate geofence ('kelurahan' | 'kantor') a
+ * check-in/out request should target, based on the current GPS fix. Returns
+ * null whenever there is nothing to choose (a single candidate) or the
+ * position isn't clearly inside one of them — the backend then falls back to
+ * the user's primary assignment and reports the usual out-of-range error.
+ */
+export async function resolveAssignmentChoiceForLocation(userData, location) {
+  try {
+    const candidates = (await resolveUserGeofenceCandidates(userData))
+      .filter(isGeofenceConfigured);
+    if (candidates.length <= 1) return null;
+    const match = pickMatchingGeofence(candidates, location);
+    return match?.withinRadius ? match.geofence.collection : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function validateLocationForUser(userData) {

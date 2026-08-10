@@ -1207,8 +1207,22 @@ async function verifyPhoto(bucket, challenge, expected, nowMs) {
   };
 }
 
-function assignmentAndRef(db, user) {
-  const assignment = core.resolveAssignment(user);
+// `assignmentChoice`, when provided, selects among the user's candidate
+// geofences (see core.resolveAssignmentCandidates) — e.g. lets field staff
+// pick the project kantor instead of their default kelurahan. Omitted or
+// null keeps the previous behaviour of always using the primary assignment.
+function assignmentAndRef(db, user, assignmentChoice) {
+  const candidates = core.resolveAssignmentCandidates(user);
+  const assignment = assignmentChoice == null ?
+    candidates[0] :
+    candidates.find((candidate) => candidate.collection === assignmentChoice);
+  if (!assignment) {
+    throw callableError(
+        "invalid-argument",
+        "ASSIGNMENT_CHOICE_INVALID",
+        "Lokasi absensi yang dipilih tidak tersedia untuk akun ini.",
+    );
+  }
   return {
     assignment,
     ref: db.collection(assignment.collection).doc(assignment.id),
@@ -1490,9 +1504,12 @@ function createAttendanceHandlers(admin) {
     return safelyRun(async () => {
       const uid = assertCallableSecurity(request, false);
       context.uid = uid;
-      assertOnlyKeys(request.data, ["action"]);
+      assertOnlyKeys(request.data, ["action", "assignmentChoice"]);
       const action = core.assertAction(request.data.action);
       context.action = action;
+      const assignmentChoice = core.assertAssignmentChoice(
+          request.data.assignmentChoice,
+      );
       const challengeId = crypto.randomUUID();
       context.challengeId = challengeId;
       const photoPath = challengeUploadPath(uid, challengeId);
@@ -1517,7 +1534,7 @@ function createAttendanceHandlers(admin) {
         const userSnapshot = await transaction.get(userRef);
         if (!userSnapshot.exists) core.assertActiveEmployee(null);
         const user = core.assertActiveEmployee(userSnapshot.data());
-        const assignmentResult = assignmentAndRef(db, user);
+        const assignmentResult = assignmentAndRef(db, user, assignmentChoice);
         context.geofenceId =
           `${assignmentResult.assignment.collection}/` +
           assignmentResult.assignment.id;
@@ -2040,18 +2057,30 @@ function createAttendanceHandlers(admin) {
         assertChallengeTarget(freshChallenge, uid, action);
         if (!userSnapshot.exists) core.assertActiveEmployee(null);
         const user = core.assertActiveEmployee(userSnapshot.data());
-        const assignmentResult = assignmentAndRef(db, user);
         const freshChallengeAssignment =
           normalizedChallengeAssignment(freshChallenge);
-        if (freshChallengeAssignment.collection !==
-              assignmentResult.assignment.collection ||
-            freshChallengeAssignment.id !== assignmentResult.assignment.id) {
+        // The challenge locked in one of the user's candidate geofences
+        // (e.g. kelurahan or the project kantor) at creation time. Re-derive
+        // the full candidate set now and require the locked-in geofence to
+        // still be among them, rather than requiring it to equal only the
+        // single default assignment.
+        const assignmentCandidate = core
+            .resolveAssignmentCandidates(user)
+            .find((candidate) =>
+              candidate.collection === freshChallengeAssignment.collection &&
+              candidate.id === freshChallengeAssignment.id);
+        if (!assignmentCandidate) {
           throw callableError(
               "failed-precondition",
               "ASSIGNMENT_CHANGED",
               "Penugasan berubah; minta challenge baru.",
           );
         }
+        const assignmentResult = {
+          assignment: assignmentCandidate,
+          ref: db.collection(assignmentCandidate.collection)
+              .doc(assignmentCandidate.id),
+        };
         if (!lockSnapshot.exists ||
             lockSnapshot.data().challengeId !== challengeId ||
             lockSnapshot.data().status !== "pending" ||

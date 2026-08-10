@@ -6,6 +6,9 @@ import { getCurrentLocation } from '../utils/geolocation';
 
 const GEOFENCE_TYPES = Object.freeze(['kelurahan', 'kantor']);
 const MAX_GEOFENCE_RADIUS_METERS = 500;
+// Kept in sync with functions/attendance-core.js's PROJECT_OFFICE_KANTOR_ID
+// and geofenceService.js's KANTOR_DEFAULT_ID.
+const PROJECT_KANTOR_ID = 'kantor-padang-kota';
 
 const getPresenceCodeCallable = httpsCallable(
   functions,
@@ -207,18 +210,22 @@ export async function loadOnsitePresenceGeofences() {
   }
 }
 
-function employeeAssignment(data) {
+// Geofence keys an employee may be issued an onsite code at. Field staff can
+// be verified at either their kelurahan or the project kantor (they may
+// check in/out at either); office staff remain kantor-only. Mirrors
+// functions/attendance-core.js's resolveAssignmentCandidates.
+function employeeAssignments(data) {
   if (data.assignmentType === 'kelurahan' || data.role === 'field_staff') {
     return typeof data.kelurahanId === 'string' && data.kelurahanId
-      ? `kelurahan/${data.kelurahanId}`
-      : '';
+      ? [`kelurahan/${data.kelurahanId}`, `kantor/${PROJECT_KANTOR_ID}`]
+      : [];
   }
   if (data.assignmentType === 'kantor' || data.role === 'office_staff') {
     return typeof data.kantorId === 'string' && data.kantorId
-      ? `kantor/${data.kantorId}`
-      : '';
+      ? [`kantor/${data.kantorId}`]
+      : [];
   }
-  return '';
+  return [];
 }
 
 export async function loadOnsitePresenceEmployees() {
@@ -236,13 +243,13 @@ export async function loadOnsitePresenceEmployees() {
         employee.mustChangePassword !== true &&
         employee.role !== 'admin' &&
         employee.isAdmin !== true &&
-        employeeAssignment(employee)
+        employeeAssignments(employee).length > 0
       )
       .map((employee) => ({
         id: employee.id,
         name: employee.name || employee.displayName || employee.email || employee.id,
         email: employee.email || '',
-        geofenceKey: employeeAssignment(employee),
+        geofenceKeys: employeeAssignments(employee),
       }))
       .sort((first, second) => first.name.localeCompare(second.name, 'id'));
   } catch (error) {

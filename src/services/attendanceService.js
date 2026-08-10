@@ -88,6 +88,10 @@ const reasonMessages = {
     'Konfigurasi layanan absensi tidak valid. Hubungi operator.',
   CHALLENGE_POLICY_INVALID:
     'Kebijakan challenge absensi tidak valid atau sudah berubah. Mulai ulang proses.',
+  ASSIGNMENT_CHOICE_INVALID:
+    'Lokasi absensi yang dipilih tidak tersedia untuk akun ini. Mulai ulang proses absensi.',
+  ASSIGNMENT_CHANGED:
+    'Penugasan lokasi berubah saat proses berjalan. Mulai ulang dari awal.',
   ASSIGNMENT_LOCATION_MISSING:
     'Dokumen lokasi penugasan tidak ditemukan. Hubungi admin untuk memperbaiki penugasan.',
   ASSIGNMENT_LOCATION_INVALID:
@@ -243,14 +247,23 @@ function assertChallenge(challenge, expectedAction, uid) {
   throw new Error('Mode verifikasi absensi dari server tidak dikenali.');
 }
 
-export async function createAttendanceChallenge(action) {
+export async function createAttendanceChallenge(action, assignmentChoice = null) {
   assertAction(action);
   if (!auth.currentUser) {
     throw new Error('Anda harus login untuk melakukan absensi.');
   }
+  if (
+    assignmentChoice != null &&
+    !['kelurahan', 'kantor'].includes(assignmentChoice)
+  ) {
+    throw new Error('Pilihan lokasi absensi tidak valid.');
+  }
 
   try {
-    const response = await createChallengeCallable({ action });
+    const payload = assignmentChoice == null
+      ? { action }
+      : { action, assignmentChoice };
+    const response = await createChallengeCallable(payload);
     const challenge = response.data;
     assertChallenge(challenge, action, auth.currentUser.uid);
     return challenge;

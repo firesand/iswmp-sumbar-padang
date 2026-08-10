@@ -18,6 +18,7 @@ import {
   validateLocationAgainstAllowedLocations,
   validateLocationAgainstGeofence,
 } from '../../utils/geolocation';
+import { resolveAssignmentChoiceForLocation } from '../../services/geofenceService';
 import {
   captureGpsSignalTrace,
   describeGpsCaptureStatus,
@@ -285,21 +286,22 @@ function EmployeeDashboard() {
   // inside an operator-declared operational location (assignment and/or
   // temporary venue), but deliberately does not pretend that the point passed
   // a dual-control geofence audit.
-  const validateLocation = async (challenge = null) => {
+  const validateLocation = async (challenge = null, options = {}) => {
     let result;
     if (challenge?.verificationMode === VERIFICATION_MODE_LOCATION_PHOTO) {
       result = await validateLocationAgainstAllowedLocations(
         challenge.allowedLocations,
+        options,
       );
     } else if (challenge?.geofence) {
       result = await validateLocationAgainstGeofence({
         ...challenge.geofence,
         nama: challenge.geofence?.name,
         isActive: true,
-      });
+      }, options);
     } else {
       try {
-        const currentLocation = await getCurrentLocation();
+        const currentLocation = options.location || await getCurrentLocation();
         result = {
           isValid: isValidGpsCoords(currentLocation),
           transitionMode: false,
@@ -326,11 +328,11 @@ function EmployeeDashboard() {
         setPermissionGuideFocus('location');
         setPermissionGuideOpen(true);
       }
-      return false;
+      return result;
     }
     setLocation(result.location);
     setLocationValidation(result);
-    return true;
+    return result;
   };
 
   const openPermissionGuide = (focus = 'both') => {
@@ -504,15 +506,25 @@ function EmployeeDashboard() {
 
       // Check permission/accuracy before consuming a server challenge.
       setCameraHint('Membaca lokasi GPS… mohon tunggu, jangan tekan ulang.');
-      const isLocationValid = await validateLocation();
-      if (!isLocationValid) return;
+      const locationCheck = await validateLocation();
+      if (!locationCheck.isValid) return;
 
       const action = type === 'out' ? 'checkOut' : 'checkIn';
+      // Field staff may attend either their kelurahan or the project kantor;
+      // best-effort pick which one this fix falls inside so the challenge is
+      // requested against the right geofence. Reuses the fix just captured
+      // instead of reading GPS again. Returns null (server default) for
+      // anyone with only one candidate, or when the position doesn't clearly
+      // match either.
+      const assignmentChoice = await resolveAssignmentChoiceForLocation(
+        userData,
+        locationCheck.location,
+      );
       setCameraHint('Meminta izin absensi dari server…');
-      const challenge = await createAttendanceChallenge(action);
+      const challenge = await createAttendanceChallenge(action, assignmentChoice);
       setCameraHint('Memeriksa lokasi terhadap titik yang diizinkan…');
-      const challengeLocationValid = await validateLocation(challenge);
-      if (!challengeLocationValid) return;
+      const challengeLocationCheck = await validateLocation(challenge);
+      if (!challengeLocationCheck.isValid) return;
       setCameraHint('Menyiapkan kamera…');
       attendanceChallengeRef.current = challenge;
       setAttendanceChallenge(challenge);

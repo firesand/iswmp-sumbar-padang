@@ -38,7 +38,7 @@ function OnsitePresenceCode() {
     [geofences, selectedKey]
   );
   const eligibleEmployees = useMemo(
-    () => employees.filter((employee) => employee.geofenceKey === selectedKey),
+    () => employees.filter((employee) => employee.geofenceKeys?.includes(selectedKey)),
     [employees, selectedKey]
   );
   const selectedEmployee = useMemo(

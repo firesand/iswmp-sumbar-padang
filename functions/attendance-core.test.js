@@ -254,6 +254,43 @@ test("active employee and canonical assignment are required", () => {
   }), /belum dikonfigurasi/);
 });
 
+test("field staff may also attend the project kantor; office staff cannot fall back to kelurahan", () => {
+  const fieldStaff = {
+    accountStatus: "active",
+    isActive: true,
+    role: "field_staff",
+    assignmentType: "kelurahan",
+    kelurahanId: "kel-test",
+  };
+  assert.deepEqual(core.resolveAssignmentCandidates(fieldStaff), [
+    {collection: "kelurahan", id: "kel-test"},
+    {collection: "kantor", id: core.PROJECT_OFFICE_KANTOR_ID},
+  ]);
+
+  const officeStaff = {
+    accountStatus: "active",
+    isActive: true,
+    role: "office_staff",
+    assignmentType: "kantor",
+    kantorId: "kantor-padang-kota",
+  };
+  assert.deepEqual(core.resolveAssignmentCandidates(officeStaff), [
+    {collection: "kantor", id: "kantor-padang-kota"},
+  ]);
+});
+
+test("assignment choice validates against the allowed collections only", () => {
+  assert.equal(core.assertAssignmentChoice(null), null);
+  assert.equal(core.assertAssignmentChoice(undefined), null);
+  assert.equal(core.assertAssignmentChoice("kelurahan"), "kelurahan");
+  assert.equal(core.assertAssignmentChoice("kantor"), "kantor");
+  assert.throws(
+      () => core.assertAssignmentChoice("kantor-padang-kota"),
+      /tidak valid/,
+  );
+  assert.throws(() => core.assertAssignmentChoice(""), /tidak valid/);
+});
+
 test("JPEG bytes are fully decoded, dimension checked, and hashed", async () => {
   const photo = await jpegBuffer();
   const result = await core.validatePhotoBytes(photo);
