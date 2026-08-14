@@ -71,7 +71,9 @@ export const sendDailyReminder = (phoneNumber, name) => {
 export const sendMonthlyReportWhatsApp = (phoneNumber, reportSummary) => {
   const message = `
 *LAPORAN BULANAN ATTENDANCE — ${PROJECT.shortName}*
-${reportSummary.month} ${reportSummary.year}
+${reportSummary.periodLabel || `${reportSummary.month} ${reportSummary.year}`}${reportSummary.contractDayEnd
+    ? `\nHari kontrak ke-${reportSummary.contractDayStart} s/d ke-${reportSummary.contractDayEnd}`
+    : ''}
 
 *RINGKASAN:*
 • Total Karyawan: ${reportSummary.totalEmployees}
@@ -143,7 +145,7 @@ export const messageTemplates = {
   },
   reminder: {
     subject: 'Reminder Check-in',
-    template: `Pagi {name}! Jangan lupa check-in hari ini. Jam kerja: 08:00-17:00 WIB — ${getAppUrl()}`,
+    template: `Pagi {name}! Jangan lupa check-in hari ini. Jam kerja: 08:00-16:00 WIB (Batas on-time: 08:10 WIB) — ${getAppUrl()}`,
   },
   late: {
     subject: 'Alert Keterlambatan',

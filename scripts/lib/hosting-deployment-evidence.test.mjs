@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,6 +13,9 @@ import {
 
 const CSP = "default-src 'self'; script-src 'self' " +
   'https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; ' +
+  "media-src 'self' data: blob: https://firebasestorage.googleapis.com; " +
+  'frame-src https://www.google.com/recaptcha/ ' +
+  'https://recaptcha.google.com/recaptcha/ https://www.youtube-nocookie.com; ' +
   "script-src-attr 'none'; object-src 'none'; base-uri 'none'; " +
   "frame-ancestors 'none'";
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -136,6 +139,48 @@ test('strict CSP rejects executable inline script policy', () => {
     error => error instanceof HostingEvidenceMismatch &&
       error.code === 'HOSTING_CSP_SCRIPT_POLICY_INVALID'
   );
+});
+
+test('strict CSP requires the exact deliverable media and frame origins', () => {
+  assert.doesNotThrow(() => assertStrictScriptCsp(CSP));
+  assert.throws(
+    () => assertStrictScriptCsp(CSP.replace(
+      ' https://firebasestorage.googleapis.com',
+      ''
+    )),
+    error => error instanceof HostingEvidenceMismatch &&
+      error.code === 'HOSTING_CSP_MEDIA_POLICY_INVALID'
+  );
+  assert.throws(
+    () => assertStrictScriptCsp(CSP.replace(
+      ' https://www.youtube-nocookie.com',
+      ''
+    )),
+    error => error instanceof HostingEvidenceMismatch &&
+      error.code === 'HOSTING_CSP_FRAME_POLICY_INVALID'
+  );
+  assert.throws(
+    () => assertStrictScriptCsp(CSP.replace(
+      'https://www.youtube-nocookie.com',
+      'https:'
+    )),
+    error => error instanceof HostingEvidenceMismatch &&
+      error.code === 'HOSTING_CSP_FRAME_POLICY_INVALID'
+  );
+});
+
+test('firebase Hosting config carries the strict deliverable CSP allowlists', async () => {
+  const firebaseConfig = JSON.parse(await readFile(
+    new URL('../../firebase.json', import.meta.url),
+    'utf8'
+  ));
+  const csp = firebaseConfig.hosting.headers
+    .find(entry => entry.source === '**')?.headers
+    .find(header => header.key.toLowerCase() === 'content-security-policy')?.value;
+
+  assert.doesNotThrow(() => assertStrictScriptCsp(csp));
+  assert.match(csp, /media-src[^;]*https:\/\/firebasestorage\.googleapis\.com(?:[;\s]|$)/);
+  assert.match(csp, /frame-src[^;]*https:\/\/www\.youtube-nocookie\.com(?:[;\s]|$)/);
 });
 
 test('live Hosting evidence accepts omitted advisory fileCount', async () => {

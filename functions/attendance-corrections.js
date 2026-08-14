@@ -179,11 +179,14 @@ function assertActiveAdmin(snapshot) {
   const user = snapshot.data();
   if (user.accountStatus !== "active" || user.isActive !== true ||
       user.mustChangePassword === true ||
-      (user.role !== "admin" && user.isAdmin !== true)) {
+      (user.role !== "admin" && user.isAdmin !== true) ||
+      user.adminRole === "viewer" || user.adminRole === "monitor" ||
+      user.isViewer === true ||
+      user.role === "admin_viewer" || user.role === "viewer") {
     throw callableError(
         "permission-denied",
         "ADMIN_REQUIRED",
-        "Hanya admin aktif yang dapat memproses koreksi absensi.",
+        "Hanya admin pengelola aktif yang dapat memproses koreksi absensi.",
     );
   }
   return user;

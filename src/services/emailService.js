@@ -82,9 +82,9 @@ export const sendDailyReminder = async (employeeEmail, employeeName) => {
     to_email: employeeEmail,
     to_name: employeeName,
     date: new Date().toLocaleDateString('id-ID'),
-    office_hours: '08:00 - 17:00',
+    office_hours: '08:00 - 16:00',
     login_url: getAppUrl(),
-    message: `Pengingat: Jangan lupa untuk melakukan check-in hari ini di ${PROJECT.shortName}. Office hours: 08:00 - 17:00.`
+    message: `Pengingat: Jangan lupa untuk melakukan check-in hari ini di ${PROJECT.shortName}. Jam kerja: 08:00 - 16:00 WIB (Batas on-time: 08:10 WIB).`
   };
 
   try {
@@ -107,13 +107,21 @@ export const sendMonthlyReport = async (recipientEmail, reportData) => {
     to_name: reportData.recipientName,
     month: reportData.month,
     year: reportData.year,
+    // Periode kontrak/SPK — laporan tidak lagi memakai bulan kalender penuh.
+    period_label: reportData.periodLabel || `${reportData.month} ${reportData.year}`,
+    period_range: reportData.periodRange || reportData.period,
+    period_start: reportData.periodStartDate,
+    period_end: reportData.periodEndDate,
+    contract_label: reportData.contractLabel,
+    contract_day_start: reportData.contractDayStart,
+    contract_day_end: reportData.contractDayEnd,
     total_employees: reportData.totalEmployees,
     total_work_days: reportData.totalWorkDays,
     avg_attendance: reportData.avgAttendance,
     total_late: reportData.totalLate,
     perfect_attendance_count: reportData.perfectAttendance?.length || 0,
     dashboard_url: getAdminUrl(),
-    message: `Laporan attendance bulanan ${reportData.month} ${reportData.year} telah tersedia.`
+    message: `Laporan attendance ${reportData.periodLabel || `${reportData.month} ${reportData.year}`} telah tersedia.`
   };
 
   try {
@@ -267,7 +275,7 @@ export const emailTemplates = {
   },
   reminder: {
     subject: `Reminder: Check-in Hari Ini — ${PROJECT.shortName}`,
-    body: `Jangan lupa untuk melakukan check-in hari ini. Office hours: 08:00 - 17:00. Login: ${getAppUrl()}`
+    body: `Jangan lupa untuk melakukan check-in hari ini. Jam kerja: 08:00 - 16:00 WIB (Batas on-time: 08:10 WIB). Login: ${getAppUrl()}`
   },
   late: {
     subject: `Alert: Late Check-in — ${PROJECT.shortName}`,

@@ -151,6 +151,29 @@ const inactiveAdmin = {
   isActive: false,
   role: 'admin',
 };
+const viewerAdmin = {
+  accountStatus: 'active',
+  isActive: true,
+  role: 'admin',
+  adminRole: 'viewer',
+  isViewer: true,
+};
+const activeTeamLeader = {
+  accountStatus: 'active',
+  isActive: true,
+  role: 'office_staff',
+  assignmentType: 'kantor',
+  kantorId: 'kantor-padang-kota',
+  peranKantor: 'KORKOT',
+};
+const activeDataManagementExpert = {
+  accountStatus: 'active',
+  isActive: true,
+  role: 'office_staff',
+  assignmentType: 'kantor',
+  kantorId: 'kantor-padang-kota',
+  peranKantor: 'ASMAN_DATA',
+};
 const passwordChangeAdmin = {
   ...activeAdmin,
   mustChangePassword: true,
@@ -158,6 +181,9 @@ const passwordChangeAdmin = {
 
 const employeeUid = 'rules-employee';
 const adminUid = 'rules-admin';
+const viewerAdminUid = 'rules-viewer-admin';
+const teamLeaderUid = 'rules-team-leader';
+const dataManagementUid = 'rules-data-management';
 const recoveryUid = 'rules-recovery-user';
 const recoveryEmail = 'recovery@example.test';
 const registrationUid = 'rules-registration-user';
@@ -275,6 +301,68 @@ const registrationOfficeProfile = {
   kantorId: canonicalKantorId,
   peranKantor: 'OPERATOR',
 };
+const deliverableId = 'laporan_pendahuluan';
+const deliverableUploadId = '11111111-2222-4333-8444-555555555555';
+const deliverableFileName = `${deliverableUploadId}_laporan.pdf`;
+const deliverableObjectPath =
+  `deliverables/${deliverableId}/${deliverableFileName}`;
+const deliverableUploadReservationPath = firestorePath(
+  'deliverable_uploadReservations',
+  deliverableUploadId,
+);
+const deliverablePath = firestorePath(
+  'deliverables_submissions',
+  deliverableId,
+);
+const publicDeliverablePath = firestorePath('deliverables_public', deliverableId);
+const deliverableSubmission = (uid, overrides = {}) => ({
+  deliverableId,
+  code: 'LP',
+  registrationNumber: 'DOC-ISWMP-LP/SAK/2026',
+  status: 'draft',
+  scopeChecklist: {},
+  files: [],
+  storagePaths: [],
+  revision: 1,
+  lastUpdatedAt: rulesRequestTime,
+  updatedBy: {
+    uid,
+    name: 'Rules Deliverable Actor',
+    email: 'actor@example.test',
+    role: 'office_staff',
+  },
+  ...overrides,
+});
+const publicDeliverable = (overrides = {}) => ({
+  deliverableId,
+  code: 'LP',
+  registrationNumber: 'DOC-ISWMP-LP/SAK/2026',
+  status: 'submitted',
+  scopeChecklist: {},
+  videoUrl: '',
+  activityDate: '',
+  activityLocation: '',
+  attendeesCount: '',
+  speakers: '',
+  discussionDate: '',
+  discussionNotes: '',
+  files: [],
+  storagePaths: [deliverableObjectPath],
+  submittedBy: 'Rules Deliverable Actor',
+  submittedAt: '2026-07-23T00:00:00.000Z',
+  lastUpdatedAt: rulesRequestTime,
+  ...overrides,
+});
+const deliverableUploadReservation = (overrides = {}) => ({
+  uploadId: deliverableUploadId,
+  deliverableId,
+  storagePath: deliverableObjectPath,
+  uploadedBy: teamLeaderUid,
+  status: 'pending',
+  createdAt: rulesRequestTime,
+  expiresAt: '2026-07-23T00:30:00Z',
+  ...overrides,
+});
 
 const canonicalAssignmentMocks = [
   firestoreDocumentMock('kelurahan', canonicalKelurahanId, {
@@ -370,6 +458,17 @@ const firestoreCases = [
     },
     resource: { data: attendanceData },
     functionMocks: [firestoreUserMock(adminUid, activeAdmin)],
+  },
+  {
+    name: 'active monitor admin can read employee attendance',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: attendancePath,
+      method: 'get',
+    },
+    resource: { data: attendanceData },
+    functionMocks: [firestoreUserMock(viewerAdminUid, viewerAdmin)],
   },
   {
     name: 'inactive admin cannot read employee attendance',
@@ -897,6 +996,41 @@ const firestoreCases = [
     functionMocks: canonicalAssignmentMocks,
   },
   {
+    name: 'self-registration can select canonical TEAM_LEADER office role',
+    expectation: 'ALLOW',
+    request: {
+      auth: {
+        uid: registrationUid,
+        token: { email: registrationEmail },
+      },
+      path: firestorePath('users', registrationUid),
+      method: 'create',
+      resource: {
+        data: { ...registrationOfficeProfile, peranKantor: 'TEAM_LEADER' },
+      },
+    },
+    functionMocks: canonicalAssignmentMocks,
+  },
+  {
+    name: 'self-registration can select canonical TA_DATA_MANAGEMENT office role',
+    expectation: 'ALLOW',
+    request: {
+      auth: {
+        uid: registrationUid,
+        token: { email: registrationEmail },
+      },
+      path: firestorePath('users', registrationUid),
+      method: 'create',
+      resource: {
+        data: {
+          ...registrationOfficeProfile,
+          peranKantor: 'TA_DATA_MANAGEMENT',
+        },
+      },
+    },
+    functionMocks: canonicalAssignmentMocks,
+  },
+  {
     name: 'self-registration cannot select an unknown geofence',
     expectation: 'DENY',
     request: {
@@ -1106,6 +1240,25 @@ const firestoreCases = [
     functionMocks: [firestoreUserMock(employeeUid, activeEmployee)],
   },
   {
+    name: 'active monitor admin cannot update own profile fields',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: firestorePath('users', viewerAdminUid),
+      method: 'update',
+      time: rulesRequestTime,
+      resource: {
+        data: {
+          ...viewerAdmin,
+          address: 'Monitor write attempt',
+          updatedAt: rulesRequestTime,
+        },
+      },
+    },
+    resource: { data: viewerAdmin },
+    functionMocks: [firestoreUserMock(viewerAdminUid, viewerAdmin)],
+  },
+  {
     name: 'active admin can approve a pending non-admin account',
     expectation: 'ALLOW',
     request: {
@@ -1132,6 +1285,36 @@ const firestoreCases = [
     },
     functionMocks: [
       firestoreUserMock(adminUid, activeAdmin),
+      ...canonicalAssignmentMocks,
+    ],
+  },
+  {
+    name: 'active monitor admin cannot approve a pending non-admin account',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: firestorePath('users', employeeUid),
+      method: 'update',
+      time: rulesRequestTime,
+      resource: {
+        data: {
+          ...activeEmployee,
+          approvedAt: '2026-07-23T00:00:00Z',
+          approvedBy: viewerAdminUid,
+          assignmentReviewedAt: '2026-07-23T00:00:00Z',
+          assignmentReviewedBy: viewerAdminUid,
+        },
+      },
+    },
+    resource: {
+      data: {
+        ...activeEmployee,
+        accountStatus: 'pending',
+        isActive: false,
+      },
+    },
+    functionMocks: [
+      firestoreUserMock(viewerAdminUid, viewerAdmin),
       ...canonicalAssignmentMocks,
     ],
   },
@@ -1805,12 +1988,264 @@ const firestoreCases = [
     },
     functionMocks: [firestoreUserMock(adminUid, activeAdmin)],
   },
+  {
+    name: 'active KORKOT can read and create a deliverable submission',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverablePath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: { data: deliverableSubmission(teamLeaderUid) },
+    },
+    functionMocks: [firestoreUserMock(teamLeaderUid, activeTeamLeader)],
+  },
+  {
+    name: 'active ASMAN_DATA can update a deliverable submission',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: dataManagementUid, token: {} },
+      path: deliverablePath,
+      method: 'update',
+      time: rulesRequestTime,
+      resource: {
+        data: deliverableSubmission(dataManagementUid, {
+          notes: 'Revisi',
+          revision: 2,
+        }),
+      },
+    },
+    resource: { data: deliverableSubmission(teamLeaderUid) },
+    functionMocks: [
+      firestoreUserMock(dataManagementUid, activeDataManagementExpert),
+    ],
+  },
+  {
+    name: 'monitor admin can read but cannot write deliverable submissions',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: deliverablePath,
+      method: 'get',
+    },
+    resource: { data: deliverableSubmission(teamLeaderUid) },
+    functionMocks: [firestoreUserMock(viewerAdminUid, viewerAdmin)],
+  },
+  {
+    name: 'monitor admin cannot update a deliverable submission',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: deliverablePath,
+      method: 'update',
+      time: rulesRequestTime,
+      resource: { data: deliverableSubmission(viewerAdminUid) },
+    },
+    resource: { data: deliverableSubmission(teamLeaderUid) },
+    functionMocks: [firestoreUserMock(viewerAdminUid, viewerAdmin)],
+  },
+  {
+    name: 'ordinary employee cannot read a private deliverable submission',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: employeeUid, token: {} },
+      path: deliverablePath,
+      method: 'get',
+    },
+    resource: { data: deliverableSubmission(teamLeaderUid) },
+    functionMocks: [firestoreUserMock(employeeUid, activeEmployee)],
+  },
+  {
+    name: 'deliverable writer cannot forge updatedBy actor',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverablePath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: { data: deliverableSubmission('forged-user') },
+    },
+    functionMocks: [firestoreUserMock(teamLeaderUid, activeTeamLeader)],
+  },
+  {
+    name: 'even full admin cannot hard-delete deliverable history',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: adminUid, token: {} },
+      path: deliverablePath,
+      method: 'delete',
+    },
+    resource: { data: deliverableSubmission(teamLeaderUid) },
+    functionMocks: [firestoreUserMock(adminUid, activeAdmin)],
+  },
+  {
+    name: 'unauthenticated recipient can read sanitized published deliverable',
+    expectation: 'ALLOW',
+    request: {
+      path: publicDeliverablePath,
+      method: 'get',
+    },
+    resource: { data: publicDeliverable() },
+  },
+  {
+    name: 'unauthenticated recipient cannot read a draft public projection',
+    expectation: 'DENY',
+    request: {
+      path: publicDeliverablePath,
+      method: 'get',
+    },
+    resource: { data: publicDeliverable({ status: 'draft' }) },
+  },
+  {
+    name: 'active KORKOT can publish a sanitized deliverable projection',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: publicDeliverablePath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: { data: publicDeliverable() },
+    },
+    functionMocks: [firestoreUserMock(teamLeaderUid, activeTeamLeader)],
+  },
+  {
+    name: 'public deliverable projection rejects private actor metadata',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: publicDeliverablePath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: {
+        data: {
+          ...publicDeliverable(),
+          updatedBy: { uid: teamLeaderUid, email: 'private@example.test' },
+        },
+      },
+    },
+    functionMocks: [firestoreUserMock(teamLeaderUid, activeTeamLeader)],
+  },
+  {
+    name: 'deliverable writer can reserve an exact pending upload path',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableUploadReservationPath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: { data: deliverableUploadReservation() },
+    },
+    functionMocks: [firestoreUserMock(teamLeaderUid, activeTeamLeader)],
+  },
+  {
+    name: 'deliverable writer can atomically commit own pending upload',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableUploadReservationPath,
+      method: 'update',
+      time: rulesRequestTime,
+      resource: {
+        data: deliverableUploadReservation({
+          status: 'committed',
+          committedAt: rulesRequestTime,
+        }),
+      },
+    },
+    resource: { data: deliverableUploadReservation() },
+    functionMocks: [
+      firestoreUserMock(teamLeaderUid, activeTeamLeader),
+      firestoreAfterMock(
+        'deliverables_submissions',
+        deliverableId,
+        deliverableSubmission(teamLeaderUid, {
+          storagePaths: [deliverableObjectPath],
+          revision: 2,
+        })
+      ),
+    ],
+  },
+  {
+    name: 'standalone reservation commit without submission write is denied',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableUploadReservationPath,
+      method: 'update',
+      time: rulesRequestTime,
+      resource: {
+        data: deliverableUploadReservation({
+          status: 'committed',
+          committedAt: rulesRequestTime,
+        }),
+      },
+    },
+    resource: { data: deliverableUploadReservation() },
+    functionMocks: [
+      firestoreUserMock(teamLeaderUid, activeTeamLeader),
+      firestoreAfterMock(
+        'deliverables_submissions',
+        deliverableId,
+        deliverableSubmission(teamLeaderUid, {
+          storagePaths: [deliverableObjectPath],
+          lastUpdatedAt: '2026-07-22T23:59:59Z',
+        })
+      ),
+    ],
+  },
+  {
+    name: 'reservation commit without its storage path in submission is denied',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableUploadReservationPath,
+      method: 'update',
+      time: rulesRequestTime,
+      resource: {
+        data: deliverableUploadReservation({
+          status: 'committed',
+          committedAt: rulesRequestTime,
+        }),
+      },
+    },
+    resource: { data: deliverableUploadReservation() },
+    functionMocks: [
+      firestoreUserMock(teamLeaderUid, activeTeamLeader),
+      firestoreAfterMock(
+        'deliverables_submissions',
+        deliverableId,
+        deliverableSubmission(teamLeaderUid, { revision: 2 })
+      ),
+    ],
+  },
+  {
+    name: 'committed deliverable upload reservation cannot be deleted',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableUploadReservationPath,
+      method: 'delete',
+    },
+    resource: {
+      data: deliverableUploadReservation({
+        status: 'committed',
+        committedAt: rulesRequestTime,
+      }),
+    },
+    functionMocks: [firestoreUserMock(teamLeaderUid, activeTeamLeader)],
+  },
 ];
 
 const storageUserMock = (uid, data) => ({
   function: 'firestore.get',
   args: [{ exactValue: firestorePath('users', uid) }],
   result: { value: { data } },
+});
+
+const storageUserExistsMock = (uid, value) => ({
+  function: 'firestore.exists',
+  args: [{ exactValue: firestorePath('users', uid) }],
+  result: { value },
 });
 
 const challengeId = '11111111-1111-4111-8111-111111111111';
@@ -1827,6 +2262,38 @@ const validProof = {
     action: 'checkIn',
   },
 };
+const profilePhotoPath =
+  `/b/${bucket}/o/profiles/${registrationUid}/registration-profile`;
+const validProfilePhoto = {
+  name: profilePhotoPath,
+  bucket,
+  size: 100 * 1024,
+  contentType: 'image/jpeg',
+};
+const deliverableRequestPath = `/b/${bucket}/o/${deliverableObjectPath}`;
+const validDeliverableFile = {
+  name: deliverableRequestPath,
+  bucket,
+  size: 2 * 1024 * 1024,
+  contentType: 'application/pdf',
+  metadata: {
+    deliverableId,
+    uploadedBy: teamLeaderUid,
+    uploadId: deliverableUploadId,
+  },
+};
+
+const storagePublishedDeliverableMock = (overrides = {}) => ({
+  function: 'firestore.get',
+  args: [{ exactValue: publicDeliverablePath }],
+  result: { value: { data: publicDeliverable(overrides) } },
+});
+
+const storageDeliverableReservationMock = (overrides = {}) => ({
+  function: 'firestore.get',
+  args: [{ exactValue: deliverableUploadReservationPath }],
+  result: { value: { data: deliverableUploadReservation(overrides) } },
+});
 
 const storageChallengeMock = (overrides = {}) => ({
   function: 'firestore.get',
@@ -1863,6 +2330,263 @@ const storageWriteRequest = (resource = validProof) => ({
 });
 
 const storageCases = [
+  {
+    name: 'newly authenticated user can create own pending profile photo',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: registrationUid, token: {} },
+      path: profilePhotoPath,
+      method: 'create',
+      resource: validProfilePhoto,
+    },
+    functionMocks: [storageUserExistsMock(registrationUid, false)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'newly authenticated user can read back own pending profile photo',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: registrationUid, token: {} },
+      path: profilePhotoPath,
+      method: 'get',
+    },
+    resource: validProfilePhoto,
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'newly authenticated user cannot create another profile photo',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: employeeUid, token: {} },
+      path: profilePhotoPath,
+      method: 'create',
+      resource: validProfilePhoto,
+    },
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'profile registration upload is restricted to one deterministic path',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: registrationUid, token: {} },
+      path: `/b/${bucket}/o/profiles/${registrationUid}/extra-photo.jpg`,
+      method: 'create',
+      resource: {
+        ...validProfilePhoto,
+        name: `/b/${bucket}/o/profiles/${registrationUid}/extra-photo.jpg`,
+      },
+    },
+    functionMocks: [storageUserExistsMock(registrationUid, false)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'pending profile upload must be an image',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: registrationUid, token: {} },
+      path: profilePhotoPath,
+      method: 'create',
+      resource: { ...validProfilePhoto, contentType: 'text/html' },
+    },
+    functionMocks: [storageUserExistsMock(registrationUid, false)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'registration owner can delete a profile photo when profile commit failed',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: registrationUid, token: {} },
+      path: profilePhotoPath,
+      method: 'delete',
+    },
+    resource: validProfilePhoto,
+    functionMocks: [storageUserExistsMock(registrationUid, false)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'registration owner cannot delete photo after profile commit',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: registrationUid, token: {} },
+      path: profilePhotoPath,
+      method: 'delete',
+    },
+    resource: validProfilePhoto,
+    functionMocks: [storageUserExistsMock(registrationUid, true)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'active KORKOT can upload valid deliverable file',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: validDeliverableFile,
+    },
+    functionMocks: [
+      storageUserMock(teamLeaderUid, activeTeamLeader),
+      storageDeliverableReservationMock(),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'active ASMAN_DATA can upload valid deliverable file',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: dataManagementUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'create',
+      time: rulesRequestTime,
+      resource: {
+        ...validDeliverableFile,
+        metadata: {
+          deliverableId,
+          uploadedBy: dataManagementUid,
+          uploadId: deliverableUploadId,
+        },
+      },
+    },
+    functionMocks: [
+      storageUserMock(dataManagementUid, activeDataManagementExpert),
+      storageDeliverableReservationMock({ uploadedBy: dataManagementUid }),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'monitor admin cannot upload deliverable file',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'create',
+      resource: {
+        ...validDeliverableFile,
+        metadata: { deliverableId, uploadedBy: viewerAdminUid },
+      },
+    },
+    functionMocks: [storageUserMock(viewerAdminUid, viewerAdmin)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'deliverable upload rejects forged uploader metadata',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'create',
+      resource: {
+        ...validDeliverableFile,
+        metadata: { deliverableId, uploadedBy: 'forged-user' },
+      },
+    },
+    functionMocks: [storageUserMock(teamLeaderUid, activeTeamLeader)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'deliverable upload enforces 250 MB limit',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'create',
+      resource: {
+        ...validDeliverableFile,
+        size: 250 * 1024 * 1024 + 1,
+      },
+    },
+    functionMocks: [storageUserMock(teamLeaderUid, activeTeamLeader)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'deliverable owner can roll back a pending reserved upload',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'delete',
+      time: '2026-07-23T00:10:00Z',
+    },
+    resource: validDeliverableFile,
+    functionMocks: [
+      storageUserMock(teamLeaderUid, activeTeamLeader),
+      storageDeliverableReservationMock(),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'committed deliverable upload cannot use rollback delete',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: teamLeaderUid, token: {} },
+      path: deliverableRequestPath,
+      method: 'delete',
+      time: '2026-07-23T00:10:00Z',
+    },
+    resource: validDeliverableFile,
+    functionMocks: [
+      storageUserMock(teamLeaderUid, activeTeamLeader),
+      storageDeliverableReservationMock({ status: 'committed' }),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'public recipient can read file for published deliverable',
+    expectation: 'ALLOW',
+    request: {
+      path: deliverableRequestPath,
+      method: 'get',
+    },
+    resource: validDeliverableFile,
+    functionMocks: [
+      storagePublishedDeliverableMock(),
+      storageDeliverableReservationMock({ status: 'committed' }),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'public recipient cannot read file for draft deliverable',
+    expectation: 'DENY',
+    request: {
+      path: deliverableRequestPath,
+      method: 'get',
+    },
+    resource: validDeliverableFile,
+    functionMocks: [
+      storagePublishedDeliverableMock({ status: 'draft' }),
+      storageDeliverableReservationMock({ status: 'committed' }),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'public recipient cannot read an unlisted file in published folder',
+    expectation: 'DENY',
+    request: {
+      path: deliverableRequestPath,
+      method: 'get',
+    },
+    resource: validDeliverableFile,
+    functionMocks: [
+      storagePublishedDeliverableMock({ storagePaths: [] }),
+      storageDeliverableReservationMock({ status: 'committed' }),
+    ],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'public recipient cannot read a file whose reservation is pending',
+    expectation: 'DENY',
+    request: {
+      path: deliverableRequestPath,
+      method: 'get',
+    },
+    resource: validDeliverableFile,
+    functionMocks: [
+      storagePublishedDeliverableMock(),
+      storageDeliverableReservationMock({ status: 'pending' }),
+    ],
+    pathEncoding: 'PLAIN',
+  },
   {
     name: 'valid one-time JPEG proof upload is allowed',
     expectation: 'ALLOW',
@@ -2040,6 +2764,18 @@ const storageCases = [
     pathEncoding: 'PLAIN',
   },
   {
+    name: 'active monitor admin can read employee proof',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: proofRequestPath,
+      method: 'get',
+    },
+    resource: validProof,
+    functionMocks: [storageUserMock(viewerAdminUid, viewerAdmin)],
+    pathEncoding: 'PLAIN',
+  },
+  {
     name: 'inactive admin cannot read employee proof',
     expectation: 'DENY',
     request: {
@@ -2049,6 +2785,40 @@ const storageCases = [
     },
     resource: validProof,
     functionMocks: [storageUserMock(adminUid, inactiveAdmin)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'full admin can write admin storage',
+    expectation: 'ALLOW',
+    request: {
+      auth: { uid: adminUid, token: {} },
+      path: `/b/${bucket}/o/admin/report.pdf`,
+      method: 'create',
+      resource: {
+        name: `/b/${bucket}/o/admin/report.pdf`,
+        bucket,
+        size: 1024,
+        contentType: 'application/pdf',
+      },
+    },
+    functionMocks: [storageUserMock(adminUid, activeAdmin)],
+    pathEncoding: 'PLAIN',
+  },
+  {
+    name: 'monitor admin cannot write admin storage',
+    expectation: 'DENY',
+    request: {
+      auth: { uid: viewerAdminUid, token: {} },
+      path: `/b/${bucket}/o/admin/report.pdf`,
+      method: 'create',
+      resource: {
+        name: `/b/${bucket}/o/admin/report.pdf`,
+        bucket,
+        size: 1024,
+        contentType: 'application/pdf',
+      },
+    },
+    functionMocks: [storageUserMock(viewerAdminUid, viewerAdmin)],
     pathEncoding: 'PLAIN',
   },
 ];

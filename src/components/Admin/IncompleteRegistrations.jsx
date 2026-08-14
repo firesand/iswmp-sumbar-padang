@@ -35,7 +35,7 @@ const formatAuthDate = (value) => {
   });
 };
 
-function IncompleteRegistrations({ onQueued }) {
+function IncompleteRegistrations({ onQueued, readOnly = false }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -323,18 +323,24 @@ function IncompleteRegistrations({ onQueued }) {
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => openRecoveryForm(account)}
-                disabled={account.disabled === true}
-                className={`mt-4 w-full rounded-lg px-3 py-2 text-sm font-medium text-white ${
-                  account.disabled === true
-                    ? 'cursor-not-allowed bg-gray-400'
-                    : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                {account.disabled === true ? 'Akun Auth Nonaktif' : 'Lengkapi Data'}
-              </button>
+              {readOnly ? (
+                <div className="mt-4 rounded-lg bg-gray-100 p-2 text-center text-xs text-gray-500 font-medium">
+                  Mode Pemantau (Lihat Saja)
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => openRecoveryForm(account)}
+                  disabled={account.disabled === true}
+                  className={`mt-4 w-full rounded-lg px-3 py-2 text-sm font-medium text-white ${
+                    account.disabled === true
+                      ? 'cursor-not-allowed bg-gray-400'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {account.disabled === true ? 'Akun Auth Nonaktif' : 'Lengkapi Data'}
+                </button>
+              )}
               {account.disabled === true && (
                 <p className="mt-2 text-xs text-amber-700">
                   Aktifkan akun melalui workflow tepercaya sebelum pemulihan dilanjutkan.

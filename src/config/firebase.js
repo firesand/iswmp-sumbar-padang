@@ -11,16 +11,18 @@ import { getStorage } from 'firebase/storage';
 import { FIREBASE_CREDENTIALS } from './firebase.credentials.js';
 
 // Env vars override credentials (production/Vercel); fallback ke credentials file
+const env = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || FIREBASE_CREDENTIALS.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || FIREBASE_CREDENTIALS.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || FIREBASE_CREDENTIALS.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || FIREBASE_CREDENTIALS.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || FIREBASE_CREDENTIALS.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || FIREBASE_CREDENTIALS.appId,
+  apiKey: env.VITE_FIREBASE_API_KEY || FIREBASE_CREDENTIALS.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || FIREBASE_CREDENTIALS.authDomain,
+  projectId: env.VITE_FIREBASE_PROJECT_ID || FIREBASE_CREDENTIALS.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || FIREBASE_CREDENTIALS.storageBucket,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || FIREBASE_CREDENTIALS.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID || FIREBASE_CREDENTIALS.appId,
 };
 
-if (import.meta.env.DEV) {
+if (env.DEV) {
   console.log('🔥 Firebase project:', firebaseConfig.projectId);
 }
 
@@ -31,22 +33,23 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 // pernah diaktifkan otomatis agar build production tidak dapat melewati
 // attestation karena salah konfigurasi.
 const appCheckSiteKey =
-  import.meta.env.VITE_FIREBASE_APPCHECK_RECAPTCHA_ENTERPRISE_KEY ||
+  env.VITE_FIREBASE_APPCHECK_RECAPTCHA_ENTERPRISE_KEY ||
   '6LdHKWAtAAAAAPSuf2CiKLvAp_BYmZ7nipKQQqt5';
-const explicitDebugToken = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN;
+const explicitDebugToken = env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN;
 
-if (import.meta.env.DEV && explicitDebugToken) {
+if (env.DEV && explicitDebugToken) {
   globalThis.FIREBASE_APPCHECK_DEBUG_TOKEN = explicitDebugToken;
 }
 
-export const appCheck = appCheckSiteKey
-  ? initializeAppCheck(app, {
-      provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
-      isTokenAutoRefreshEnabled: true,
-    })
-  : null;
+export const appCheck =
+  typeof window !== 'undefined' && typeof document !== 'undefined' && appCheckSiteKey
+    ? initializeAppCheck(app, {
+        provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+        isTokenAutoRefreshEnabled: true,
+      })
+    : null;
 
-if (!appCheck) {
+if (!appCheck && typeof window !== 'undefined') {
   console.error(
     'Firebase App Check belum dikonfigurasi. Set ' +
       'VITE_FIREBASE_APPCHECK_RECAPTCHA_ENTERPRISE_KEY; callable sensitif akan ditolak.'
@@ -57,21 +60,14 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(
   app,
-  import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'asia-southeast2'
+  env.VITE_FIREBASE_FUNCTIONS_REGION || 'asia-southeast2'
 );
 
-let storage;
+let storage = null;
 try {
   storage = getStorage(app);
 } catch (storageError) {
   console.warn('⚠️ Firebase Storage initialization failed:', storageError);
-  storage = {
-    app,
-    bucket: firebaseConfig.storageBucket,
-    ref: () => Promise.reject(new Error('Storage not available')),
-    uploadBytes: () => Promise.reject(new Error('Storage not available')),
-    getDownloadURL: () => Promise.reject(new Error('Storage not available')),
-  };
 }
 
 export { storage };

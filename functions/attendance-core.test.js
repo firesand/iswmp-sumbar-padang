@@ -39,21 +39,21 @@ async function jpegBuffer(width = 640, height = 480) {
 }
 
 test("server stamp uses WIB date and canonical deadline", () => {
-  const beforeDeadline = new Date("2026-07-23T00:59:59.000Z");
-  const atDeadline = new Date("2026-07-23T01:00:00.000Z");
-  assert.deepEqual(core.getServerAttendanceStamp(beforeDeadline, "08:00"), {
+  const atDeadline = new Date("2026-07-23T01:10:00.000Z"); // 08:10:00 WIB
+  const afterDeadline = new Date("2026-07-23T01:11:00.000Z"); // 08:11:00 WIB
+  assert.deepEqual(core.getServerAttendanceStamp(atDeadline, "08:10"), {
     date: "2026-07-23",
     status: "ontime",
-    deadline: "08:00",
+    deadline: "08:10",
     timeZone: "Asia/Jakarta",
   });
   assert.equal(
-      core.getServerAttendanceStamp(atDeadline, "08:00").status,
+      core.getServerAttendanceStamp(afterDeadline, "08:10").status,
       "late",
   );
   assert.equal(
       core.getServerAttendanceStamp(atDeadline, "not-a-time").deadline,
-      "08:00",
+      "08:10",
   );
 });
 

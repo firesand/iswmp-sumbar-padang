@@ -137,6 +137,7 @@ const isOpenCorrectionCandidate = (record, today = getWibDateString()) =>
 export default function AttendanceCorrectionPanel({
   attendanceRecords = [],
   onChanged,
+  readOnly = false,
 }) {
   const [selectedAttendanceId, setSelectedAttendanceId] = useState('');
   const [checkOutAt, setCheckOutAt] = useState(wibDateTimeInput());
@@ -369,84 +370,93 @@ export default function AttendanceCorrectionPanel({
         memerlukan admin kedua.
       </p>
 
-      <form onSubmit={submitProposal} className="mt-4 grid gap-3 md:grid-cols-2">
-        <label className="text-sm font-medium text-gray-800 md:col-span-2">
-          Pegawai belum check-out
-          <select
-            value={selectedAttendanceId}
-            onChange={(event) => handleSelectAttendance(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-            disabled={loading || detecting || eligibleRecords.length === 0}
-            required
-          >
-            {detecting && (
-              <option value="">Mendeteksi shift terbuka…</option>
-            )}
-            {!detecting && eligibleRecords.length === 0 && (
-              <option value="">Tidak ada shift terbuka terdeteksi</option>
-            )}
-            {!detecting && eligibleRecords.map((record) => (
-              <option key={record.id} value={record.id}>
-                {formatCandidateLabel(record)}
-              </option>
-            ))}
-          </select>
-          <span className="mt-1 block text-xs font-normal text-gray-500">
-            {detecting
-              ? `Memindai absensi ${getWibDateString()} dan ${CORRECTION_LOOKBACK_DAYS - 1} hari sebelumnya…`
-              : eligibleRecords.length === 0
-                ? 'Semua shift dalam rentang ini sudah selesai atau sudah dikoreksi.'
-                : `${eligibleRecords.length} pegawai terdeteksi belum check-out.`}
-          </span>
-          {selectedRecord && (
-            <span className="mt-2 block rounded-lg border border-orange-100 bg-white px-3 py-2 text-xs font-normal text-gray-700">
-              Terpilih: <strong>{selectedRecord.userName || selectedRecord.userId}</strong>
-              {' · '}tanggal kerja {selectedRecord.date}
-              {' · '}ID <code className="break-all">{selectedRecord.id}</code>
+      {readOnly ? (
+        <div className="mt-4 rounded-lg border border-orange-200 bg-white p-4 text-sm text-orange-900">
+          <p className="font-semibold text-orange-950">Mode Pemantau (Hanya Baca)</p>
+          <p className="mt-1 text-xs text-orange-800">
+            Anda dapat memantau status shift terbuka dan daftar usulan koreksi. Pengajuan dan persetujuan koreksi hanya dapat dilakukan oleh Admin Pengelola.
+          </p>
+        </div>
+      ) : (
+        <form onSubmit={submitProposal} className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="text-sm font-medium text-gray-800 md:col-span-2">
+            Pegawai belum check-out
+            <select
+              value={selectedAttendanceId}
+              onChange={(event) => handleSelectAttendance(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
+              disabled={loading || detecting || eligibleRecords.length === 0}
+              required
+            >
+              {detecting && (
+                <option value="">Mendeteksi shift terbuka…</option>
+              )}
+              {!detecting && eligibleRecords.length === 0 && (
+                <option value="">Tidak ada shift terbuka terdeteksi</option>
+              )}
+              {!detecting && eligibleRecords.map((record) => (
+                <option key={record.id} value={record.id}>
+                  {formatCandidateLabel(record)}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs font-normal text-gray-500">
+              {detecting
+                ? `Memindai absensi ${getWibDateString()} dan ${CORRECTION_LOOKBACK_DAYS - 1} hari sebelumnya…`
+                : eligibleRecords.length === 0
+                  ? 'Semua shift dalam rentang ini sudah selesai atau sudah dikoreksi.'
+                  : `${eligibleRecords.length} pegawai terdeteksi belum check-out.`}
             </span>
-          )}
-        </label>
-        <label className="text-sm font-medium text-gray-800">
-          Checkout efektif (WIB)
-          <input
-            type="datetime-local"
-            value={checkOutAt}
-            onChange={(event) => setCheckOutAt(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-            disabled={loading || !selectedAttendanceId}
-          />
-          <span className="mt-1 block text-xs font-normal text-gray-500">
-            Otomatis diisi ~17:00 WIB hari check-in (dibatasi max 24 jam / tidak
-            ke masa depan). Sesuaikan jika perlu.
-          </span>
-        </label>
-        <label className="text-sm font-medium text-gray-800">
-          Alasan (10–500 karakter)
-          <textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            minLength={10}
-            maxLength={500}
-            rows={3}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-            disabled={loading || !selectedAttendanceId}
-            required
-            placeholder="Contoh: Lupa check-out; shift expired. Koreksi administratif."
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={
-            loading ||
-            detecting ||
-            !selectedAttendanceId ||
-            reason.trim().length < 10
-          }
-          className="rounded-lg bg-orange-700 px-4 py-2.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 md:col-span-2"
-        >
-          Ajukan koreksi
-        </button>
-      </form>
+            {selectedRecord && (
+              <span className="mt-2 block rounded-lg border border-orange-100 bg-white px-3 py-2 text-xs font-normal text-gray-700">
+                Terpilih: <strong>{selectedRecord.userName || selectedRecord.userId}</strong>
+                {' · '}tanggal kerja {selectedRecord.date}
+                {' · '}ID <code className="break-all">{selectedRecord.id}</code>
+              </span>
+            )}
+          </label>
+          <label className="text-sm font-medium text-gray-800">
+            Checkout efektif (WIB)
+            <input
+              type="datetime-local"
+              value={checkOutAt}
+              onChange={(event) => setCheckOutAt(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
+              disabled={loading || !selectedAttendanceId}
+            />
+            <span className="mt-1 block text-xs font-normal text-gray-500">
+              Otomatis diisi ~17:00 WIB hari check-in (dibatasi max 24 jam / tidak
+              ke masa depan). Sesuaikan jika perlu.
+            </span>
+          </label>
+          <label className="text-sm font-medium text-gray-800">
+            Alasan (10–500 karakter)
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              minLength={10}
+              maxLength={500}
+              rows={3}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
+              disabled={loading || !selectedAttendanceId}
+              required
+              placeholder="Contoh: Lupa check-out; shift expired. Koreksi administratif."
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              detecting ||
+              !selectedAttendanceId ||
+              reason.trim().length < 10
+            }
+            className="rounded-lg bg-orange-700 px-4 py-2.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 md:col-span-2"
+          >
+            Ajukan koreksi
+          </button>
+        </form>
+      )}
 
       {message && (
         <p className="mt-3 rounded-lg bg-white px-3 py-2 text-sm text-gray-800">
@@ -511,27 +521,35 @@ export default function AttendanceCorrectionPanel({
                 </span>
               </div>
               {finalStatus === 'pending' && (
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => review(proposal.id, 'approve')}
-                    disabled={loading || selfProposed}
-                    className="rounded bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
-                  >
-                    Setujui
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => review(proposal.id, 'reject')}
-                    disabled={loading || selfProposed}
-                    className="rounded bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
-                  >
-                    Tolak
-                  </button>
-                  {selfProposed && (
-                    <span className="self-center text-xs text-orange-800">
-                      Harus direview admin kedua.
+                <div className="mt-3 flex gap-2 items-center">
+                  {readOnly ? (
+                    <span className="rounded bg-amber-50 border border-amber-200 px-2.5 py-1 text-xs font-medium text-amber-800">
+                      Menunggu review Admin Pengelola
                     </span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => review(proposal.id, 'approve')}
+                        disabled={loading || selfProposed}
+                        className="rounded bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                      >
+                        Setujui
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => review(proposal.id, 'reject')}
+                        disabled={loading || selfProposed}
+                        className="rounded bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                      >
+                        Tolak
+                      </button>
+                      {selfProposed && (
+                        <span className="self-center text-xs text-orange-800">
+                          Harus direview admin kedua.
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               )}

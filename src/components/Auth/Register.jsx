@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { deleteObject, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../../config/firebase';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentLocation } from '../../utils/geolocation';
@@ -97,6 +97,8 @@ function Register() {
     setRegistrationStep('processing');
     let createdNewAuthUser = false;
     let recoveringIncompleteRegistration = false;
+    let uploadedProfilePhotoRef = null;
+    let registrationCommitted = false;
 
     try {
       console.log('🚀 Starting registration process...');
@@ -163,7 +165,13 @@ function Register() {
       let photoURL = '';
       if (photo) {
         console.log('📸 Uploading photo...');
-        const photoRef = ref(storage, `profiles/${user.uid}/${photo.name}`);
+        // One deterministic object bounds pre-profile storage usage and lets a
+        // recovery attempt replace the same uncommitted upload safely.
+        const photoRef = ref(
+          storage,
+          `profiles/${user.uid}/registration-profile`
+        );
+        uploadedProfilePhotoRef = photoRef;
         const snapshot = await uploadBytes(photoRef, photo);
         photoURL = await getDownloadURL(snapshot.ref);
         console.log('✅ Photo uploaded:', photoURL);
@@ -229,6 +237,7 @@ function Register() {
         registrationBatch.delete(doc(db, 'incompleteRegistrations', user.uid));
       }
       await registrationBatch.commit();
+      registrationCommitted = true;
       console.log('✅ User document and registration request created');
 
       // SUCCESS - Show success state and handle navigation properly
@@ -259,6 +268,10 @@ function Register() {
 
       // Clean up on failure
       try {
+        if (uploadedProfilePhotoRef && !registrationCommitted) {
+          await deleteObject(uploadedProfilePhotoRef);
+          console.log('✅ Cleaned up uncommitted profile photo');
+        }
         if (auth.currentUser && createdNewAuthUser) {
           await auth.currentUser.delete();
           console.log('✅ Cleaned up failed user account');

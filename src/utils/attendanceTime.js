@@ -10,6 +10,8 @@ export const ATTENDANCE_TIMEZONE = 'Asia/Jakarta';
 // Fallback dokumentasi lama saja. Status authoritative selalu dihitung backend
 // dari projectConfig/default.jamCheckInDeadline, bukan dikirim client.
 export const LATE_HOUR_WIB = 8;
+export const LATE_MINUTE_WIB = 10;
+export const DEFAULT_CHECKIN_DEADLINE = '08:10';
 
 const wibDateParts = (date = new Date()) =>
   new Intl.DateTimeFormat('en-US', {
@@ -74,17 +76,34 @@ export const getWibHour = (date = new Date()) => {
   return Number(hour);
 };
 
-export const getAttendanceStatus = (date = new Date()) =>
-  getWibHour(date) >= LATE_HOUR_WIB ? 'late' : 'ontime';
+export const getWibMinutes = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ATTENDANCE_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+  return hour * 60 + minute;
+};
+
+export const getAttendanceStatus = (date = new Date(), deadline = DEFAULT_CHECKIN_DEADLINE) => {
+  const currentMinutes = getWibMinutes(date);
+  const [dHour, dMinute] = (deadline || DEFAULT_CHECKIN_DEADLINE).split(':').map(Number);
+  const deadlineMinutes = (Number.isFinite(dHour) ? dHour : 8) * 60 + (Number.isFinite(dMinute) ? dMinute : 10);
+  return currentMinutes > deadlineMinutes ? 'late' : 'ontime';
+};
 
 // Legacy/UI helper. Backend tidak mempercayai nilai ini dan menghitung status
 // dari deadline canonical sendiri.
-export const getAttendanceStamp = () => {
+export const getAttendanceStamp = (deadline = DEFAULT_CHECKIN_DEADLINE) => {
   const now = new Date();
   return {
     now,
     date: getWibDateString(now),
-    status: getAttendanceStatus(now),
+    status: getAttendanceStatus(now, deadline),
   };
 };
 

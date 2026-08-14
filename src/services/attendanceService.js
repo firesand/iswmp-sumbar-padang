@@ -20,7 +20,7 @@ const getAttendancePhotoUrlCallable = httpsCallable(
 const VALID_ACTIONS = new Set(['checkIn', 'checkOut']);
 export const VERIFICATION_MODE_GEOFENCE_ONSITE = 'geofence_onsite';
 export const VERIFICATION_MODE_LOCATION_PHOTO = 'location_photo';
-export const EARLY_LEAVE_THRESHOLD_HOUR_WIB = 17;
+export const EARLY_LEAVE_THRESHOLD_HOUR_WIB = 16;
 export const EARLY_LEAVE_REASON_MIN_LENGTH = 5;
 export const EARLY_LEAVE_REASON_MAX_LENGTH = 300;
 
@@ -212,7 +212,14 @@ function assertChallenge(challenge, expectedAction, uid) {
   }
   if (verificationMode === VERIFICATION_MODE_LOCATION_PHOTO) {
     const assignment = challenge.assignment;
-    const expiresAtMs = Date.parse(challenge.verificationModeExpiresAt);
+    // A permanent server policy has no expiry at all; a time-boxed one must
+    // still be in the future.
+    const expiresAtMs = challenge.verificationModeExpiresAt == null ?
+      null :
+      Date.parse(challenge.verificationModeExpiresAt);
+    const expiryValid = challenge.verificationModeExpiresAt == null ?
+      true :
+      Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
     const allowedLocations = challenge.allowedLocations;
     const hasValidAllowedLocations = Array.isArray(allowedLocations) &&
       allowedLocations.length > 0 &&
@@ -236,8 +243,7 @@ function assertChallenge(challenge, expectedAction, uid) {
       typeof assignment.name !== 'string' ||
       assignment.name.trim().length === 0 ||
       challenge.presenceProofRequired !== false ||
-      !Number.isFinite(expiresAtMs) ||
-      expiresAtMs <= Date.now() ||
+      !expiryValid ||
       !hasValidAllowedLocations
     ) {
       throw new Error('Kebijakan mode lokasi dan foto dari server tidak valid.');

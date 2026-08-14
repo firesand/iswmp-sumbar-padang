@@ -42,7 +42,7 @@ Pagi ${employeeName}!
 
 *Reminder Check-in Hari Ini — ${PROJECT.shortName}*
 
-Jam Kerja: 08:00 - 17:00 WIB
+Jam Kerja: 08:00 - 16:00 WIB (Batas On-Time Check-In: 08:10 WIB)
 Jangan lupa check-in tepat waktu + foto selfie + GPS aktif.
 
 Login / check-in:
@@ -67,8 +67,8 @@ ${getAppUrl()}
 Silakan login dan mulai check-in sesuai jadwal kerja.
 
 Jam Kerja:
-• Check-in: 08:00 WIB
-• Check-out: 17:00 WIB
+• Check-in: 08:00 - 08:10 WIB (On-Time)
+• Check-out: Mulai 16:00 WIB
 
 Terima kasih,
 *${ADMIN_CONFIG.whatsapp.businessName}*
@@ -96,7 +96,7 @@ Employee: *${employeeName}*
 Check-in Time: ${checkInTime}
 Status: *LATE*
 
-Expected: 08:00 WIB
+Expected: On-time maksimal 08:10 WIB
 Actual: ${checkInTime}
 
 Dashboard admin:
@@ -113,7 +113,7 @@ export const EMAIL_TEMPLATES = {
 Halo ${employeeName}!
 
 Jangan lupa check-in hari ini.
-Office hours: 08:00 - 17:00
+Jam kerja: 08:00 - 16:00 WIB (Batas On-Time: 08:10 WIB).
 
 Login di: ${getAppUrl()}
 

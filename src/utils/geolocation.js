@@ -359,19 +359,6 @@ export const validateLocationAgainstAllowedLocations = async (
     )
     : [];
 
-  if (candidates.length === 0) {
-    return {
-      isValid: false,
-      transitionMode: true,
-      message:
-        'Tidak ada lokasi operasional yang diizinkan untuk absensi saat ini.',
-      distance: null,
-      location: null,
-      matchedLocation: null,
-      code: 'OPERATIONAL_LOCATION_UNAVAILABLE',
-    };
-  }
-
   let currentLocation;
   try {
     currentLocation = await resolveLocationForValidation(options);
@@ -408,6 +395,19 @@ export const validateLocationAgainstAllowedLocations = async (
       source: currentLocation.source,
       accuracy: currentLocation.accuracy,
       code: 'GPS_ACCURACY',
+    };
+  }
+
+  if (candidates.length === 0) {
+    return {
+      isValid: true,
+      transitionMode: true,
+      message: `Lokasi dinamis: Koordinat (${currentLocation.lat.toFixed(5)}, ${currentLocation.lng.toFixed(5)}) dengan akurasi ±${Math.round(currentLocation.accuracy)}m`,
+      distance: null,
+      location: currentLocation,
+      matchedLocation: null,
+      source: currentLocation.source,
+      accuracy: currentLocation.accuracy,
     };
   }
 
@@ -449,7 +449,7 @@ export const validateLocationAgainstAllowedLocations = async (
       message:
         `Berada dalam radius ${bestMatch.name} ` +
         `(${bestMatch.distance}m + akurasi ${Math.round(currentLocation.accuracy)}m ` +
-        `/ max ${bestMatch.maxRadius}m). Mode operasional sementara — GPS + foto.`,
+        `/ max ${bestMatch.maxRadius}m).`,
       distance: bestMatch.distance,
       location: currentLocation,
       matchedLocation: bestMatch.matchedLocation,
@@ -460,20 +460,17 @@ export const validateLocationAgainstAllowedLocations = async (
   }
 
   return {
-    isValid: false,
+    isValid: true,
     transitionMode: true,
     message: nearestOutside
-      ? `Jarak ${nearestOutside.distance}m + margin akurasi ` +
-        `${Math.round(currentLocation.accuracy)}m melewati batas ` +
-        `${nearestOutside.maxRadius}m dari ${nearestOutside.name}.`
-      : 'Posisi GPS berada di luar seluruh lokasi operasional yang diizinkan.',
+      ? `Lokasi dinamis: ${nearestOutside.distance}m dari ${nearestOutside.name} (akurasi ±${Math.round(currentLocation.accuracy)}m)`
+      : `Lokasi dinamis: Koordinat (${currentLocation.lat.toFixed(5)}, ${currentLocation.lng.toFixed(5)}) (akurasi ±${Math.round(currentLocation.accuracy)}m)`,
     distance: nearestOutside?.distance ?? null,
     location: currentLocation,
     matchedLocation: null,
     maxRadius: nearestOutside?.maxRadius ?? null,
     source: currentLocation.source,
     accuracy: currentLocation.accuracy,
-    code: 'OUTSIDE_OPERATIONAL_LOCATION',
   };
 };
 

@@ -178,6 +178,8 @@ export async function validateLocationForUser(userData) {
 }
 
 export const OFFICE_STAFF_ROLES = [
+  { value: 'TEAM_LEADER', label: 'Team Leader' },
+  { value: 'TA_DATA_MANAGEMENT', label: 'Tenaga Ahli Manajemen Data' },
   { value: 'KORKOT', label: 'Koordinator Kota (KorKot)' },
   { value: 'ASMAN_DATA', label: 'Asisten Manajemen Data' },
   { value: 'OPERATOR', label: 'Operator' },

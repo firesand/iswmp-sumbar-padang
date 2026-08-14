@@ -19,12 +19,21 @@ const RUN_QUERY_URL =
   'databases/(default)/documents:runQuery';
 const APPLY = process.argv.includes('--apply');
 const STOP_NEW_CHECKINS = process.argv.includes('--stop-new-checkins');
+const PERMANENT = process.argv.includes('--permanent');
 const modeArgument = process.argv.find(argument => argument.startsWith('--mode='));
 const durationArgument = process.argv.find(argument =>
   argument.startsWith('--duration-hours=')
 );
+const acceptedByArgument = process.argv.find(argument =>
+  argument.startsWith('--accepted-by=')
+);
+const reasonArgument = process.argv.find(argument =>
+  argument.startsWith('--reason=')
+);
 const mode = modeArgument?.split('=')[1] || 'location_photo';
 const durationHours = Number(durationArgument?.split('=')[1] || 24);
+const acceptedBy = acceptedByArgument?.split('=').slice(1).join('=').trim() || '';
+const acceptanceReason = reasonArgument?.split('=').slice(1).join('=').trim() || '';
 const supportedModes = new Set(['geofence_onsite', 'location_photo']);
 
 if (!supportedModes.has(mode)) {
@@ -35,7 +44,25 @@ if (STOP_NEW_CHECKINS && mode !== 'location_photo') {
     '--stop-new-checkins hanya berlaku untuk mode location_photo.'
   );
 }
+if (PERMANENT) {
+  if (mode !== 'location_photo') {
+    throw new Error('--permanent hanya berlaku untuk mode location_photo.');
+  }
+  if (STOP_NEW_CHECKINS) {
+    throw new Error('--permanent tidak dapat digabung --stop-new-checkins.');
+  }
+  if (durationArgument) {
+    throw new Error('--permanent tidak memakai --duration-hours.');
+  }
+  if (acceptedBy.length < 3 || acceptedBy.length > 120) {
+    throw new Error('--accepted-by wajib 3..120 karakter saat --permanent.');
+  }
+  if (acceptanceReason.length < 8 || acceptanceReason.length > 500) {
+    throw new Error('--reason wajib 8..500 karakter saat --permanent.');
+  }
+}
 if (
+  !PERMANENT &&
   mode === 'location_photo' &&
   (!Number.isInteger(durationHours) ||
     durationHours < 1 ||
@@ -82,13 +109,30 @@ const decodeValue = value => {
   if ('doubleValue' in value) return value.doubleValue;
   if ('timestampValue' in value) return value.timestampValue;
   if ('stringValue' in value) return value.stringValue;
+  if ('mapValue' in value) {
+    return Object.fromEntries(
+      Object.entries(value.mapValue.fields || {}).map(
+        ([key, entry]) => [key, decodeValue(entry)]
+      )
+    );
+  }
   return undefined;
 };
 
 const encodeValue = value => {
+  if (value === null) return { nullValue: null };
   if (Number.isInteger(value)) return { integerValue: String(value) };
   if (value instanceof Date) return { timestampValue: value.toISOString() };
   if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return {
+      mapValue: {
+        fields: Object.fromEntries(
+          Object.entries(value).map(([key, entry]) => [key, encodeValue(entry)])
+        ),
+      },
+    };
+  }
   throw new Error(`Tipe nilai config tidak didukung: ${typeof value}`);
 };
 
@@ -141,6 +185,7 @@ if (currentMode !== mode) {
 
 const enabledAt = new Date();
 let proposed;
+const deleteFields = [];
 if (STOP_NEW_CHECKINS) {
   if (currentMode !== 'location_photo') {
     throw new Error(
@@ -149,7 +194,8 @@ if (STOP_NEW_CHECKINS) {
   }
   const existingEnabledAt = new Date(current.locationPhotoModeEnabledAt);
   if (
-    current.locationPhotoModePolicyVersion !== 1 ||
+    (current.locationPhotoModePolicyVersion !== 1 &&
+      current.locationPhotoModePolicyVersion !== 2) ||
     Number.isNaN(existingEnabledAt.getTime()) ||
     existingEnabledAt.getTime() >= enabledAt.getTime()
   ) {
@@ -157,6 +203,8 @@ if (STOP_NEW_CHECKINS) {
       'Penghentian darurat gagal: snapshot policy location_photo tidak valid.'
     );
   }
+  // Downgrade to an already-expired time-boxed policy: new check-ins stop,
+  // open shifts keep their checkout grace window.
   proposed = {
     attendanceVerificationMode: 'location_photo',
     locationPhotoModePolicyVersion: 1,
@@ -166,6 +214,27 @@ if (STOP_NEW_CHECKINS) {
       'emergency-stop-new-checkins-checkout-grace-only',
     attendanceVerificationModeUpdatedAt: enabledAt,
   };
+  if (current.locationPhotoModePolicyVersion === 2) {
+    deleteFields.push('locationPhotoModePermanent');
+  }
+} else if (PERMANENT) {
+  proposed = {
+    attendanceVerificationMode: 'location_photo',
+    locationPhotoModePolicyVersion: 2,
+    locationPhotoModeEnabledAt: enabledAt,
+    locationPhotoModePermanent: {
+      acceptedAt: enabledAt,
+      acceptedBy,
+      reason: acceptanceReason,
+    },
+    attendanceVerificationModeReason:
+      'permanent-location-and-photo-capture-risk-accepted',
+    attendanceVerificationModeUpdatedAt: enabledAt,
+  };
+  // The time-boxed expiry must not coexist with a permanent acceptance; the
+  // backend rejects that as ambiguous. Removal goes through the update mask:
+  // the field is listed there but omitted from the written fields.
+  deleteFields.push('locationPhotoModeExpiresAt');
 } else {
   proposed = mode === 'location_photo'
   ? {
@@ -185,6 +254,11 @@ if (STOP_NEW_CHECKINS) {
         'verified-geofence-and-onsite-presence-required',
       attendanceVerificationModeUpdatedAt: enabledAt,
     };
+  if (current.locationPhotoModePolicyVersion === 2) {
+    // Leaving a stale permanent acceptance behind would contradict the
+    // time-boxed (or geofence) policy that replaces it.
+    deleteFields.push('locationPhotoModePermanent');
+  }
 }
 
 const printable = Object.fromEntries(
@@ -207,7 +281,7 @@ if (!APPLY) {
 }
 
 const params = new URLSearchParams();
-Object.keys(proposed).forEach(field =>
+[...Object.keys(proposed), ...deleteFields].forEach(field =>
   params.append('updateMask.fieldPaths', field)
 );
 params.set('currentDocument.updateTime', currentDocument.updateTime);
@@ -224,6 +298,18 @@ await api(`${CONFIG_URL}?${params}`, {
   }),
 });
 
+const canonical = value => {
+  if (value instanceof Date) return value.toISOString();
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, entry]) => [key, canonical(entry)])
+        .sort(([left], [right]) => left.localeCompare(right))
+    );
+  }
+  return value;
+};
+
 const confirmed = await api(CONFIG_URL);
 const confirmedFields = Object.fromEntries(
   Object.entries(confirmed.fields || {}).map(
@@ -231,8 +317,18 @@ const confirmedFields = Object.fromEntries(
   )
 );
 for (const [key, expected] of Object.entries(printable)) {
-  if (confirmedFields[key] !== expected) {
+  if (
+    JSON.stringify(canonical(confirmedFields[key])) !==
+      JSON.stringify(canonical(expected))
+  ) {
     throw new Error(`Verifikasi pascatulis gagal untuk field ${key}.`);
+  }
+}
+for (const field of deleteFields) {
+  if (confirmedFields[field] !== undefined && confirmedFields[field] !== null) {
+    throw new Error(
+      `Verifikasi pascatulis gagal: field ${field} seharusnya terhapus.`
+    );
   }
 }
 console.log(JSON.stringify({

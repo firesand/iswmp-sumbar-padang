@@ -307,6 +307,19 @@ test("location-photo policy is explicit, bounded, and expires fail-closed", () =
       (error) => error?.details?.reason ===
         "ATTENDANCE_VERIFICATION_POLICY_INVALID",
   );
+  // A time-boxed policy must not carry a permanent risk acceptance.
+  assert.throws(
+      () => attendance.attendanceVerificationPolicy({
+        ...config,
+        locationPhotoModePermanent: {
+          acceptedBy: "Pemilik Proyek",
+          acceptedAt: timestamp(now - 60_000),
+          reason: "Alasan penerimaan risiko.",
+        },
+      }, now),
+      (error) => error?.details?.reason ===
+        "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+  );
   const expired = {
     ...config,
     locationPhotoModeEnabledAt: timestamp(now - 120_000),
@@ -323,6 +336,81 @@ test("location-photo policy is explicit, bounded, and expires fail-closed", () =
       }).checkoutGrace,
       true,
   );
+});
+
+test("permanent location-photo policy needs explicit recorded acceptance", () => {
+  const timestamp = (value) => ({toMillis: () => value});
+  const now = Date.parse("2026-08-06T02:00:00.000Z");
+  const config = {
+    attendanceVerificationMode:
+      attendance.VERIFICATION_MODE_LOCATION_PHOTO,
+    locationPhotoModePolicyVersion:
+      attendance.LOCATION_PHOTO_MODE_PERMANENT_POLICY_VERSION,
+    locationPhotoModeEnabledAt: timestamp(now - 60_000),
+    locationPhotoModePermanent: {
+      acceptedBy: "Pemilik Proyek ISWMP",
+      acceptedAt: timestamp(now - 60_000),
+      reason: "Admin kedua tidak di Padang; dual-control tidak mungkin.",
+    },
+  };
+  const policy = attendance.attendanceVerificationPolicy(config, now);
+  assert.equal(
+      policy.verificationMode,
+      attendance.VERIFICATION_MODE_LOCATION_PHOTO,
+  );
+  assert.equal(
+      policy.locationPhotoModePolicyVersion,
+      attendance.LOCATION_PHOTO_MODE_PERMANENT_POLICY_VERSION,
+  );
+  assert.equal(policy.expiresAtMs, null);
+  assert.equal(policy.checkoutGrace, false);
+
+  // The permanent policy never expires and never enters checkout grace, even
+  // long after enablement.
+  const later = attendance.attendanceVerificationPolicy(
+      config,
+      now + 365 * 24 * 60 * 60 * 1000,
+      {allowCheckoutGrace: true, maximumShiftDurationMs: 60_000},
+  );
+  assert.equal(later.checkoutGrace, false);
+
+  const invalid = (overrides) => assert.throws(
+      () => attendance.attendanceVerificationPolicy(
+          {...config, ...overrides},
+          now,
+      ),
+      (error) => error?.details?.reason ===
+        "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+  );
+
+  // An expiry must not coexist with a permanent acceptance.
+  invalid({locationPhotoModeExpiresAt: timestamp(now + 60_000)});
+  invalid({locationPhotoModePermanent: null});
+  invalid({locationPhotoModePermanent: "accepted"});
+  invalid({locationPhotoModePermanent: {
+    ...config.locationPhotoModePermanent,
+    acceptedBy: "ab",
+  }});
+  invalid({locationPhotoModePermanent: {
+    ...config.locationPhotoModePermanent,
+    acceptedBy: 42,
+  }});
+  invalid({locationPhotoModePermanent: {
+    ...config.locationPhotoModePermanent,
+    reason: "pendek",
+  }});
+  // Acceptance cannot predate the mode it accepts, nor be in the future.
+  invalid({locationPhotoModePermanent: {
+    ...config.locationPhotoModePermanent,
+    acceptedAt: timestamp(now - 120_000),
+  }});
+  invalid({locationPhotoModePermanent: {
+    ...config.locationPhotoModePermanent,
+    acceptedAt: timestamp(now + 60_000),
+  }});
+  invalid({locationPhotoModeEnabledAt: timestamp(now + 60_000)});
+  // Unknown policy versions still fail closed.
+  invalid({locationPhotoModePolicyVersion: 3});
 });
 
 test("location-photo policy carries allowed-location digest and version", () => {

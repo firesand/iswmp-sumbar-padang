@@ -93,9 +93,13 @@ if (!SKIP_LIVE_CHECK) {
     cache: 'no-store',
   });
   const serviceWorker = await response.text();
-  if (!serviceWorker.includes(sourceVersion)) {
+  const liveServiceWorkerVersion = serviceWorker.match(
+    /const APP_VERSION = '([^']+)'/
+  )?.[1];
+  if (liveServiceWorkerVersion !== sourceVersion) {
     throw new Error(
-      `Hosting live belum memuat versi ${sourceVersion}. ` +
+      `Hosting live memuat versi ${String(liveServiceWorkerVersion)}, ` +
+        `bukan ${sourceVersion}. ` +
         'Deploy hosting dulu, atau pakai --skip-live-check jika yakin.'
     );
   }
@@ -154,6 +158,58 @@ const RELEASE_NOTES = {
       'Shift lama yang belum di-check-out tidak lagi hilang setelah 7 hari',
       'Kartu proposal koreksi menampilkan nama, bukan kode acak',
       'Peringatan jelas bila identitas pegawai tidak terbaca',
+    ],
+  },
+  '1.0.7': {
+    updateMessage:
+      'Absensi tidak lagi berhenti setiap minggu — mode lokasi dan foto ' +
+      'kini berlaku permanen atas keputusan pemilik proyek.',
+    features: [
+      'Tidak ada lagi batas waktu 7 hari untuk absensi',
+      'Keputusan penggunaan mode lokasi dan foto tercatat resmi di server',
+      'Pemeriksaan kebijakan absensi di perangkat menyesuaikan mode permanen',
+    ],
+  },
+  '1.0.8': {
+    updateMessage:
+      'Portal Deliverables & Pelaporan KAK untuk Team Leader dan ' +
+      'pembaruan batas waktu absensi dinamis serta flash notifikasi pengingat.',
+    features: [
+      'Portal Deliverables KAK lengkap (15 output dokumen, checklist KAK, uploader berkas, link publik shareable)',
+      'Absensi dinamis lokasi dengan pencatatan akurasi GPS dan Google Maps link',
+      'Batas check in on time s.d. 08:10 WIB dan flash notifikasi 08:09 WIB & 19:00 WIB',
+    ],
+  },
+  '1.0.9': {
+    updateMessage:
+      'Verifikasi Kelayakan Remunerasi & Penggajian berbasis Daily Activity, ' +
+      'Laporan Bulanan, dan Deliverables KAK pada Rekap Periode & Reports.',
+    features: [
+      'Penetapan otomatis hak pembayaran remunerasi/gaji per periode kontrak',
+      'Checklist syarat kontraktual: Daily activity, Laporan Bulanan, Laporan Pendahuluan, Triwulanan, dan Akhir',
+      'Keterangan resmi kelayakan remunerasi pada tab Rekap Periode, Reports, Arsip Bukti, dan ekspor Excel/PDF',
+      'Akses portal deliverables untuk Tenaga Ahli Manajemen Data (Abdul Aziz Sikumbang)',
+    ],
+  },
+  '1.1.0': {
+    updateMessage:
+      'Penyertaan Dokumen Foto-Foto & Video Kegiatan BOQ Kontrak pada Portal Deliverables KAK.',
+    features: [
+      '16 Master Paket Kegiatan BOQ Kontrak (Kick Off, BimTek, Sosialisasi Kota, RTPS & FGD di 11 Kelurahan, hingga Piloting & APD)',
+      'Galeri Foto Dokumentasi Lapangan dengan thumbnail & lightbox preview',
+      'Pemutar Video Tersemat (Embedded HTML5 video player & YouTube/Drive URL)',
+      'Pencatatan rincian pelaksanaan kegiatan (tanggal, lokasi 11 kelurahan, peserta hadir, narasumber)',
+    ],
+  },
+  '1.1.1': {
+    updateMessage:
+      'Pemulihan akses aplikasi, registrasi, serta penyimpanan dan media ' +
+      'deliverables dengan pengamanan konflik data.',
+    features: [
+      'Dashboard pegawai, route akun aktif, dan halaman publik deliverables kembali stabil',
+      'Upload registrasi dan deliverables tersimpan melalui rules Firebase yang sesuai',
+      'Perubahan dari dua tab atau pengguna tidak lagi saling menimpa',
+      'Video unggahan dan YouTube dapat diputar dengan kebijakan CSP yang aman',
     ],
   },
 };

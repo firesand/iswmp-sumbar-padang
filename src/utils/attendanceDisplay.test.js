@@ -56,7 +56,7 @@ test('excludes cross-day checkout from hour-of-day early/overtime metrics', () =
 
   const sameDayEarly = classifyAttendanceCheckout({
     date: '2026-07-24',
-    checkOut: timestamp('2026-07-24T09:30:00.000Z'),
+    checkOut: timestamp('2026-07-24T08:30:00.000Z'),
   });
   assert.deepEqual(sameDayEarly, {
     crossDay: false,

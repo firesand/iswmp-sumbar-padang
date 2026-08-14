@@ -1,15 +1,9 @@
 // src/components/Admin/MonthlyReports.jsx
 import { useState } from 'react';
-import { db } from '../../config/firebase';
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-  where,
-} from 'firebase/firestore';
+  fetchActiveEmployees,
+  fetchAttendancesInRange,
+} from '../../services/attendanceReportData';
 import { sendMonthlyReportWhatsApp } from '../../services/whatsappService';
 import { sendMonthlyReport } from '../../services/emailService';
 import {
@@ -22,10 +16,17 @@ import {
   isReviewableAttendancePhoto,
   isVerifiedAttendance,
 } from '../../utils/attendanceIntegrity';
+import { ATTENDANCE_TIMEZONE } from '../../utils/attendanceTime';
+import { CONTRACT } from '../../config/projectConfig';
 import {
-  ATTENDANCE_TIMEZONE,
-  getWibDateString,
-} from '../../utils/attendanceTime';
+  formatDateKeyId,
+  getActiveContractPeriod,
+  getContractEndDate,
+  getContractPeriodByIndex,
+  getContractPeriods,
+  getDateKeysInRange,
+  isWeekend,
+} from '../../utils/contractPeriods';
 import {
   getAttendanceErrorMessage,
   getAttendancePhotoUrl,
@@ -36,28 +37,9 @@ import {
   getCanonicalEarlyLeaveDetails,
   isCrossDayAttendance,
 } from '../../utils/attendanceDisplay';
-import {
-  attachEffectiveAttendanceCorrection,
-  resolveAttendanceCompletion,
-} from '../../utils/attendanceCorrection';
-
-const attachCorrectionViews = async (records) => {
-  const projectionSnapshots = await Promise.all(
-    records.map((record) => getDoc(doc(
-      db,
-      'attendanceCorrectionEffectiveViews',
-      record.id
-    )))
-  );
-  return records.map((record, index) =>
-    attachEffectiveAttendanceCorrection(
-      record,
-      projectionSnapshots[index].exists()
-        ? projectionSnapshots[index].data()
-        : null
-    )
-  );
-};
+import { resolveAttendanceCompletion } from '../../utils/attendanceCorrection';
+import { evaluatePeriodRemunerationEligibility } from '../../utils/remunerationEligibility';
+import { getAllDeliverables } from '../../services/deliverablesService';
 
 const getEffectiveCompletionRecord = (record, completion) => ({
   ...record,
@@ -77,13 +59,6 @@ const getCompletionSourceLabel = (record, completion) => {
   }
   if (completion.deviceVerified) return 'verified device';
   return 'open';
-};
-
-const formatDateKey = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 };
 
 const getCoordinates = (location) => {
@@ -120,11 +95,14 @@ const getTimestampDate = (timestamp) => {
 };
 
 function MonthlyReports() {
-  const [currentWibYear, currentWibMonth] = getWibDateString()
-    .split('-')
-    .map(Number);
-  const [selectedMonth, setSelectedMonth] = useState(currentWibMonth);
-  const [selectedYear, setSelectedYear] = useState(currentWibYear);
+  // Periode laporan mengikuti anchor tanggal SPK, bukan bulan kalender.
+  const contractPeriods = getContractPeriods();
+  const [selectedPeriodIndex, setSelectedPeriodIndex] = useState(
+    () => getActiveContractPeriod()?.index ?? 1
+  );
+  const selectedPeriod = getContractPeriodByIndex(selectedPeriodIndex)
+    ?? contractPeriods[0]
+    ?? null;
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [attendanceData, setAttendanceData] = useState([]);
@@ -151,53 +129,35 @@ function MonthlyReports() {
     }
   };
 
-  const fetchEmployees = async () => {
-    const snapshot = await getDocs(collection(db, 'users'));
-    return snapshot.docs
-      .map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
-      .filter(employee => (
-        employee.role !== 'admin' &&
-        employee.accountStatus === 'active' &&
-        employee.isActive === true
-      ));
-  };
-
   const generateReport = async () => {
+    if (!selectedPeriod) {
+      alert('Periode kontrak belum dikonfigurasi.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const employees = await fetchEmployees();
+      const employees = await fetchActiveEmployees();
 
-      // Get date range for selected month
-      const startDate = new Date(selectedYear, selectedMonth - 1, 1);
-      const endDate = new Date(selectedYear, selectedMonth, 0);
+      // Rentang periode kontrak (mis. 13 Jul – 12 Agu), bukan awal/akhir bulan.
+      const startDateStr = selectedPeriod.startDate;
+      const endDateStr = selectedPeriod.endDate;
 
-      // Use local calendar dates so WIB does not lose the last day of a month.
-      const startDateStr = formatDateKey(startDate);
-      const endDateStr = formatDateKey(endDate);
-
-      // Fetch attendance records for the month
-      const attendanceQuery = query(
-        collection(db, 'attendances'),
-        where('date', '>=', startDateStr),
-        where('date', '<=', endDateStr),
-        orderBy('date', 'asc')
+      const attendances = await fetchAttendancesInRange(
+        startDateStr,
+        endDateStr,
+        employees
       );
 
-      const attendanceSnapshot = await getDocs(attendanceQuery);
-      const employeeById = new Map(employees.map(employee => [employee.id, employee]));
-      const canonicalAttendances = attendanceSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        userName: doc.data().userName
-          || employeeById.get(doc.data().userId)?.name
-          || 'Unknown Employee'
-      }));
-      const attendances = await attachCorrectionViews(canonicalAttendances);
-
       setAttendanceData(attendances);
+      const deliverables = await getAllDeliverables();
+      const remunerationEligibility = evaluatePeriodRemunerationEligibility({
+        periodIndex: selectedPeriod.index,
+        period: selectedPeriod,
+        attendances,
+        deliverables,
+      });
+
       const operationalAttendances = attendances.filter(
         isAttendanceWorkflowEligible
       );
@@ -236,18 +196,15 @@ function MonthlyReports() {
 
       // Calculate working days (exclude weekends)
       let workingDays = 0;
-      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-        const day = d.getDay();
-        if (day !== 0 && day !== 6) { // Not Sunday or Saturday
-          workingDays++;
-          const dateStr = formatDateKey(d);
-          dailyAttendance[dateStr] = {
-            present: 0,
-            late: 0,
-            absent: 0
-          };
-        }
-      }
+      getDateKeysInRange(startDateStr, endDateStr).forEach(dateStr => {
+        if (isWeekend(dateStr)) return;
+        workingDays++;
+        dailyAttendance[dateStr] = {
+          present: 0,
+          late: 0,
+          absent: 0
+        };
+      });
 
       // Process attendance records (deduplicate by employeeId+date)
       const seenPerDay = new Set();
@@ -345,9 +302,21 @@ function MonthlyReports() {
 
       // Compile report data
       const report = {
-        month: getMonthName(selectedMonth),
-        year: selectedYear,
+        // `month`/`year` dipertahankan karena dipakai template email & WhatsApp.
+        month: selectedPeriod.shortLabel,
+        year: Number(startDateStr.slice(0, 4)),
         period: `${startDateStr} - ${endDateStr}`,
+        periodIndex: selectedPeriod.index,
+        periodLabel: selectedPeriod.label,
+        periodShortLabel: selectedPeriod.shortLabel,
+        periodRange: selectedPeriod.rangeLabel,
+        periodStartDate: startDateStr,
+        periodEndDate: endDateStr,
+        periodTotalDays: selectedPeriod.totalDays,
+        contractDayStart: selectedPeriod.contractDayStart,
+        contractDayEnd: selectedPeriod.contractDayEnd,
+        contractLabel: CONTRACT.label,
+        isPartialPeriod: selectedPeriod.isPartial,
         totalEmployees,
         totalWorkDays: workingDays,
         totalAttendanceRecords: operationalAttendances.length,
@@ -372,6 +341,7 @@ function MonthlyReports() {
         mostPunctual,
         employeeDetails: Object.values(employeeAttendance),
         dailyBreakdown: dailyAttendance,
+        remunerationEligibility,
         generatedAt: new Date().toLocaleString('id-ID', {
           timeZone: ATTENDANCE_TIMEZONE,
         })
@@ -394,10 +364,16 @@ function MonthlyReports() {
 
     // Sheet 1: Summary
     const summaryData = [
-      ['MONTHLY ATTENDANCE REPORT'],
+      ['LAPORAN KEHADIRAN PER PERIODE KONTRAK'],
       [''],
-      ['Period', `${reportData.month} ${reportData.year}`],
+      ['Contract', reportData.contractLabel],
+      ['Period', reportData.periodLabel],
       ['Date Range', reportData.period],
+      ['Calendar Days in Period', reportData.periodTotalDays],
+      [
+        'Contract Day Range',
+        `${reportData.contractDayStart} - ${reportData.contractDayEnd} of ${CONTRACT.durationDays}`
+      ],
       ['Generated', reportData.generatedAt],
       [''],
       ['SUMMARY STATISTICS'],
@@ -426,6 +402,19 @@ function MonthlyReports() {
         'Rejected Invalid Correction Projections',
         reportData.invalidCorrectionProjections
       ],
+      [''],
+      ['STATUS KELAYAKAN PEMBAYARAN REMUNERASI / GAJI'],
+      ['Status Hak Pembayaran', reportData.remunerationEligibility?.statusLabel || '-'],
+      ['Keterangan', reportData.remunerationEligibility?.summaryMessage || '-'],
+      [
+        'Syarat Terpenuhi',
+        `${reportData.remunerationEligibility?.completedCount || 0} dari ${reportData.remunerationEligibility?.totalRequirementsCount || 0} syarat`,
+      ],
+      ...(reportData.remunerationEligibility?.checklist?.map((c) => [
+        `Syarat: ${c.title}`,
+        c.fulfilled ? 'TERPENUHI' : 'BELUM TERPENUHI',
+        c.statusText,
+      ]) || []),
       [''],
       [
         'Complete Recorded Attendance Count (Verified + GPS/photo)',
@@ -600,7 +589,7 @@ function MonthlyReports() {
     }
 
     // Save file
-    const fileName = `Attendance_Report_${reportData.month}_${reportData.year}.xlsx`;
+    const fileName = `Attendance_Report_Periode-${String(reportData.periodIndex).padStart(2, '0')}_${reportData.periodStartDate}_${reportData.periodEndDate}.xlsx`;
     try {
       await downloadExcelWorkbook(sheets, fileName);
       alert(`Report exported successfully as ${fileName}`);
@@ -640,60 +629,55 @@ function MonthlyReports() {
     }
   };
 
-  const getMonthName = (month) => {
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    return months[month - 1];
-  };
-
   return (
     <div className="space-y-6">
       {/* Report Controls */}
       <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">📊 Monthly Attendance Report</h2>
+        <h2 className="text-xl font-bold text-gray-800 mb-1">
+          📊 Laporan Detail Kehadiran per Periode
+        </h2>
+        <p className="mb-4 text-sm text-gray-600">
+          Periode mengikuti {CONTRACT.label}: {formatDateKeyId(CONTRACT.startDate)}
+          {' – '}{formatDateKeyId(getContractEndDate())} ({CONTRACT.durationDays} hari),
+          dihitung per tanggal {Number(CONTRACT.startDate.slice(8))} tiap bulan.
+        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Month</label>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Periode Kontrak
+            </label>
             <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+              value={selectedPeriodIndex}
+              onChange={(e) => setSelectedPeriodIndex(parseInt(e.target.value))}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
             >
-              {[...Array(12)].map((_, i) => (
-                <option key={i + 1} value={i + 1}>
-                  {getMonthName(i + 1)}
+              {contractPeriods.map(period => (
+                <option key={period.index} value={period.index}>
+                  {period.label}{period.isPartial ? ' (periode akhir)' : ''}
                 </option>
               ))}
             </select>
+            {selectedPeriod && (
+              <p className="mt-2 text-xs text-gray-500">
+                Hari kontrak ke-{selectedPeriod.contractDayStart} s/d
+                {' '}ke-{selectedPeriod.contractDayEnd} dari {CONTRACT.durationDays}
+                {' '}· {selectedPeriod.totalDays} hari kalender
+              </p>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Year</label>
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-            >
-              {[2024, 2025, 2026].map(year => (
-                <option key={year} value={year}>{year}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-end">
+          <div className="flex items-start">
             <button
               onClick={generateReport}
               disabled={loading}
-              className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-4 py-2 mt-7 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Generating...' : 'Generate Report'}
             </button>
           </div>
 
-          <div className="flex items-end space-x-2">
+          <div className="flex items-start space-x-2 mt-7">
             <button
               onClick={exportToExcel}
               disabled={!reportData}
@@ -715,6 +699,140 @@ function MonthlyReports() {
       {/* Report Display */}
       {reportData && (
         <>
+          {/* Period Header */}
+          <div className="bg-white rounded-lg shadow-md p-4">
+            <p className="text-sm text-gray-600">{reportData.contractLabel}</p>
+            <p className="text-lg font-semibold text-gray-800">
+              {reportData.periodLabel}
+              {reportData.isPartialPeriod && (
+                <span className="ml-2 text-xs font-normal text-amber-700">
+                  periode akhir kontrak
+                </span>
+              )}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Hari kontrak ke-{reportData.contractDayStart} s/d
+              {' '}ke-{reportData.contractDayEnd} dari {CONTRACT.durationDays}
+              {' '}· {reportData.periodTotalDays} hari kalender
+              {' '}· {reportData.totalWorkDays} hari kerja
+            </p>
+          </div>
+
+          {/* Panel Status Kelayakan Pembayaran Remunerasi / Gaji */}
+          {reportData.remunerationEligibility && (
+            <div
+              className={`rounded-2xl p-5 md:p-6 border shadow-sm transition-all duration-300 ${
+                reportData.remunerationEligibility.isEligible
+                  ? 'bg-gradient-to-br from-emerald-50 via-green-50/70 to-emerald-100/50 border-emerald-300'
+                  : 'bg-gradient-to-br from-amber-50 via-orange-50/50 to-amber-100/50 border-amber-300'
+              }`}
+            >
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div
+                    className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 shadow-sm ${
+                      reportData.remunerationEligibility.isEligible
+                        ? 'bg-emerald-600 text-white shadow-emerald-600/20'
+                        : 'bg-amber-500 text-white shadow-amber-500/20'
+                    }`}
+                  >
+                    {reportData.remunerationEligibility.isEligible ? '✓' : '⚠️'}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`text-xs px-3 py-1 rounded-full font-black uppercase tracking-wider border shadow-xs ${
+                          reportData.remunerationEligibility.isEligible
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-amber-600 text-white border-amber-600'
+                        }`}
+                      >
+                        {reportData.remunerationEligibility.statusLabel}
+                      </span>
+                      <span className="text-xs font-semibold text-gray-700">
+                        Dasar Pembayaran Remunerasi {reportData.periodLabel}
+                      </span>
+                    </div>
+
+                    <h3 className="text-lg md:text-xl font-extrabold text-gray-900 mt-1.5">
+                      {reportData.remunerationEligibility.isEligible
+                        ? 'Hak Pembayaran Remunerasi: BERHAK DIBAYARKAN'
+                        : 'Hak Pembayaran Remunerasi: MENUNGGU KELENGKAPAN BERKAS'}
+                    </h3>
+                    <p className="text-xs md:text-sm text-gray-700 mt-1 leading-relaxed max-w-4xl">
+                      {reportData.remunerationEligibility.summaryMessage}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0 bg-white/90 backdrop-blur-xs p-3.5 rounded-2xl border border-gray-200 shadow-xs w-full md:w-auto">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    Kelengkapan Syarat
+                  </p>
+                  <p className="text-2xl font-black text-gray-900 mt-0.5">
+                    {reportData.remunerationEligibility.completedCount}{' '}
+                    <span className="text-xs font-semibold text-gray-500">
+                      / {reportData.remunerationEligibility.totalRequirementsCount} Syarat
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Checklist Rincian Syarat Kontraktual */}
+              <div className="mt-5 pt-4 border-t border-gray-200/80">
+                <p className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-2.5">
+                  Rincian Pemenuhan Syarat Kontraktual Remunerasi:
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {reportData.remunerationEligibility.checklist.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`p-3.5 rounded-xl border flex items-start justify-between gap-2 shadow-2xs ${
+                        item.fulfilled
+                          ? 'bg-white/95 border-emerald-300 text-emerald-950'
+                          : 'bg-white/95 border-amber-300 text-amber-950'
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-sm">
+                            {item.fulfilled ? '✅' : '⏳'}
+                          </span>
+                          <span className="font-bold text-xs md:text-sm">
+                            {item.title}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-600 line-clamp-1">
+                          {item.subtitle}
+                        </p>
+                        <p
+                          className={`text-[11px] font-bold mt-1 ${
+                            item.fulfilled ? 'text-emerald-700' : 'text-amber-700'
+                          }`}
+                        >
+                          Status: {item.statusText}
+                        </p>
+                      </div>
+
+                      {item.deliverableId && (
+                        <a
+                          href={`/deliverables/view/${item.deliverableId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold rounded-lg transition shrink-0 ml-1"
+                          title="Buka Dokumen"
+                        >
+                          Lihat ↗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
             <div className="bg-white rounded-lg shadow-md p-4">

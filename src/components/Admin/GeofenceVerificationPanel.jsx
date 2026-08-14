@@ -21,7 +21,7 @@ function coordinateLabel(value) {
   return Number.isFinite(value) ? value.toFixed(6) : '-';
 }
 
-function GeofenceVerificationPanel() {
+function GeofenceVerificationPanel({ readOnly = false }) {
   const [targets, setTargets] = useState([]);
   const [pendingProposals, setPendingProposals] = useState([]);
   const [selectedKey, setSelectedKey] = useState('');
@@ -338,14 +338,16 @@ function GeofenceVerificationPanel() {
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <button
-                  type="button"
-                  onClick={captureCenter}
-                  disabled={capturingCenter || submittingProposal}
-                  className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {capturingCenter ? 'Mengambil GPS...' : 'Gunakan GPS saya sebagai pusat'}
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={captureCenter}
+                    disabled={capturingCenter || submittingProposal}
+                    className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {capturingCenter ? 'Mengambil GPS...' : 'Gunakan GPS saya sebagai pusat'}
+                  </button>
+                )}
                 {centerEvidence && (
                   <p className="text-xs text-emerald-700">
                     GPS baru diperoleh dengan akurasi ±{Math.round(centerEvidence.accuracy)} m.
@@ -367,20 +369,26 @@ function GeofenceVerificationPanel() {
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={
-                  submittingProposal
-                  || capturingCenter
-                  || proposalsLoading
-                  || selectedHasPendingProposal
-                }
-                className="rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-              >
-                {submittingProposal
-                  ? 'Memverifikasi GPS dan mengirim...'
-                  : 'Kirim proposal untuk review admin kedua'}
-              </button>
+              {readOnly ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 font-medium">
+                  Mode Pemantau: Pengajuan perubahan koordinat geofence hanya dapat dilakukan oleh Admin Pengelola.
+                </div>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={
+                    submittingProposal
+                    || capturingCenter
+                    || proposalsLoading
+                    || selectedHasPendingProposal
+                  }
+                  className="rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {submittingProposal
+                    ? 'Memverifikasi GPS dan mengirim...'
+                    : 'Kirim proposal untuk review admin kedua'}
+                </button>
+              )}
             </>
           )}
         </form>
@@ -455,23 +463,31 @@ function GeofenceVerificationPanel() {
                         </dl>
                       </div>
 
-                      <div className="flex shrink-0 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => reviewProposal(proposal, 'reject')}
-                          disabled={Boolean(reviewingProposalId) || proposalsLoading}
-                          className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isProcessing ? 'Memproses...' : 'Tolak'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => reviewProposal(proposal, 'approve')}
-                          disabled={Boolean(reviewingProposalId) || proposalsLoading}
-                          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-                        >
-                          {isProcessing ? 'Memproses...' : 'Setujui'}
-                        </button>
+                      <div className="flex shrink-0 gap-2 items-center">
+                        {readOnly ? (
+                          <span className="rounded bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-800">
+                            Menunggu Review Admin Pengelola
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => reviewProposal(proposal, 'reject')}
+                              disabled={Boolean(reviewingProposalId) || proposalsLoading}
+                              className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isProcessing ? 'Memproses...' : 'Tolak'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => reviewProposal(proposal, 'approve')}
+                              disabled={Boolean(reviewingProposalId) || proposalsLoading}
+                              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                            >
+                              {isProcessing ? 'Memproses...' : 'Setujui'}
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}

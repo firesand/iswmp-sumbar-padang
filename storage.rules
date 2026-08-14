@@ -12,6 +12,12 @@ service firebase.storage {
       );
     }
 
+    function userProfileExists(userId) {
+      return firestore.exists(
+        /databases/(default)/documents/users/$(userId)
+      );
+    }
+
     function isActiveUser() {
       return isSignedIn()
         && userDoc().data.accountStatus == 'active'
@@ -22,20 +28,94 @@ service firebase.storage {
 
     function isActiveAdmin() {
       return isActiveUser()
-        && (userDoc().data.role == 'admin' || userDoc().data.isAdmin == true);
+        && (userDoc().data.role == 'admin'
+          || (userDoc().data.keys().hasAny(['isAdmin'])
+            && userDoc().data.isAdmin == true)
+          || userDoc().data.role == 'admin_viewer'
+          || userDoc().data.role == 'viewer');
+    }
+
+    function isFullAdmin() {
+      return isActiveAdmin()
+        && (!userDoc().data.keys().hasAny(['adminRole'])
+            || (userDoc().data.adminRole != 'viewer'
+                && userDoc().data.adminRole != 'monitor'))
+        && (!userDoc().data.keys().hasAny(['isViewer'])
+            || userDoc().data.isViewer != true)
+        && userDoc().data.role != 'admin_viewer'
+        && userDoc().data.role != 'viewer';
+    }
+
+    function hasDeliverablesOfficeRole() {
+      let d = userDoc().data;
+      return isActiveUser()
+        && d.role == 'office_staff'
+        && d.assignmentType == 'kantor'
+        && d.kantorId == 'kantor-padang-kota'
+        && d.peranKantor in [
+          'TEAM_LEADER', 'TA_DATA_MANAGEMENT', 'KORKOT', 'ASMAN_DATA'
+        ];
+    }
+
+    function hasDeliverablesWriteRole() {
+      let d = userDoc().data;
+      return isActiveUser()
+        && d.role == 'office_staff'
+        && d.assignmentType == 'kantor'
+        && d.kantorId == 'kantor-padang-kota'
+        && d.peranKantor in [
+          'TEAM_LEADER', 'TA_DATA_MANAGEMENT', 'KORKOT', 'ASMAN_DATA'
+        ];
+    }
+
+    function canReadDeliverables() {
+      return isActiveAdmin() || hasDeliverablesOfficeRole();
+    }
+
+    function canWriteDeliverables() {
+      return isFullAdmin() || hasDeliverablesWriteRole();
+    }
+
+    function isPublishedDeliverableFile(deliverableId, fileName) {
+      let published = firestore.get(
+        /databases/(default)/documents/deliverables_public/$(deliverableId)
+      ).data;
+      let reservation = firestore.get(
+        /databases/(default)/documents/deliverable_uploadReservations/$(resource.metadata.uploadId)
+      ).data;
+      let storagePath = 'deliverables/' + deliverableId + '/' + fileName;
+      return published.status in ['submitted', 'approved']
+        && storagePath in published.storagePaths
+        && resource.metadata.deliverableId == deliverableId
+        && reservation.uploadId == resource.metadata.uploadId
+        && reservation.deliverableId == deliverableId
+        && reservation.storagePath == storagePath
+        && reservation.status == 'committed';
     }
 
     function isOwnerOrAdmin(userId) {
       return (isActiveUser() && request.auth.uid == userId) || isActiveAdmin();
     }
 
-    // Profile photos - users can upload their own photos
-    match /profiles/{userId}/{allPaths=**} {
-      allow read: if isActiveUser();
-      allow write: if isActiveUser()
+    // A just-created Auth account uploads its optional photo before its pending
+    // Firestore profile exists. Creation is therefore UID-bound and image-only
+    // without relying on userDoc(); later replacement requires an active user.
+    match /profiles/{userId}/{fileName} {
+      allow read: if (isSignedIn() && request.auth.uid == userId)
+        || isActiveUser();
+      allow create, update: if isSignedIn()
                        && request.auth.uid == userId
-                       && request.resource.size < 5 * 1024 * 1024
+                       && fileName == 'registration-profile'
+                       && !userProfileExists(userId)
+                       && request.resource.size > 0
+                       && request.resource.size <= 5 * 1024 * 1024
                        && request.resource.contentType.matches('image/.*');
+      // Registration cleanup may remove only an object whose Firestore profile
+      // was never committed. Once the profile exists, client deletion closes.
+      allow delete: if isSignedIn()
+                       && request.auth.uid == userId
+                       && fileName == 'registration-profile'
+                       && !userProfileExists(userId);
     }
 
     // Historical attendance photos are read-only. New proofs must use a
@@ -100,10 +180,77 @@ service firebase.storage {
       allow write: if false; // No write access to public assets
     }
 
+    function isAllowedDeliverableContentType(contentType) {
+      return contentType in [
+          'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+          'video/mp4', 'video/quicktime', 'video/webm',
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'application/zip', 'application/x-zip-compressed',
+          'application/vnd.rar', 'application/x-rar-compressed'
+        ];
+    }
+
+    function isValidDeliverableUpload(deliverableId, fileName) {
+      let reservation = firestore.get(
+        /databases/(default)/documents/deliverable_uploadReservations/$(request.resource.metadata.uploadId)
+      ).data;
+      let storagePath = 'deliverables/' + deliverableId + '/' + fileName;
+      return deliverableId.matches('^[a-z0-9_]{1,100}$')
+        && fileName.matches('^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$')
+        && request.resource.size > 0
+        && request.resource.size <= 250 * 1024 * 1024
+        && isAllowedDeliverableContentType(request.resource.contentType)
+        && request.resource.metadata.keys().hasOnly([
+          'deliverableId', 'uploadedBy', 'uploadId'
+        ])
+        && request.resource.metadata.keys().hasAll([
+          'deliverableId', 'uploadedBy', 'uploadId'
+        ])
+        && request.resource.metadata.deliverableId == deliverableId
+        && request.resource.metadata.uploadedBy == request.auth.uid
+        && reservation.uploadId == request.resource.metadata.uploadId
+        && reservation.deliverableId == deliverableId
+        && reservation.storagePath == storagePath
+        && reservation.uploadedBy == request.auth.uid
+        && reservation.status == 'pending'
+        && reservation.expiresAt > request.time;
+    }
+
+    function isPendingOwnDeliverableUpload(deliverableId, fileName) {
+      let reservation = firestore.get(
+        /databases/(default)/documents/deliverable_uploadReservations/$(resource.metadata.uploadId)
+      ).data;
+      return canWriteDeliverables()
+        && resource.metadata.deliverableId == deliverableId
+        && resource.metadata.uploadedBy == request.auth.uid
+        && reservation.uploadId == resource.metadata.uploadId
+        && reservation.deliverableId == deliverableId
+        && reservation.storagePath ==
+          'deliverables/' + deliverableId + '/' + fileName
+        && reservation.uploadedBy == request.auth.uid
+        && reservation.status == 'pending';
+    }
+
+    match /deliverables/{deliverableId}/{fileName} {
+      allow read: if canReadDeliverables()
+        || isPublishedDeliverableFile(deliverableId, fileName);
+      allow create: if canWriteDeliverables()
+        && isValidDeliverableUpload(deliverableId, fileName);
+      allow update: if false;
+      // Rollback closes atomically when the reservation becomes committed.
+      allow delete: if isPendingOwnDeliverableUpload(deliverableId, fileName);
+    }
+
     // Admin uploads - only admins can upload to admin folder
     match /admin/{allPaths=**} {
       allow read: if isActiveAdmin();
-      allow write: if isActiveAdmin() &&
+      allow write: if isFullAdmin() &&
                        request.resource.size < 10 * 1024 * 1024; // 10MB max
     }
   }

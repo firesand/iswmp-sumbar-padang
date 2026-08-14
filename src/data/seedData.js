@@ -166,7 +166,7 @@ export const KANTOR_SEED = {
 export const PROJECT_CONFIG_SEED = {
   id: 'default',
   namaProyek: 'ISWMP SumBar-Padang',
-  jamCheckInDeadline: '08:00',
+  jamCheckInDeadline: '08:10',
   timezone: 'Asia/Jakarta',
   geofenceTransitionMode: false,
   maxAttendanceShiftDurationMinutes: 1440,

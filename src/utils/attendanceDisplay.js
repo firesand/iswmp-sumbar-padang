@@ -45,7 +45,7 @@ export const isCrossDayAttendance = (attendance) => {
 export const classifyAttendanceCheckout = (
   attendance,
   {
-    earlyLeaveBeforeHour = 17,
+    earlyLeaveBeforeHour = 16,
     overtimeAtOrAfterHour = 18,
   } = {}
 ) => {
@@ -122,7 +122,7 @@ export const rowsToCsv = (rows) =>
 
 /**
  * Prefer the matched operational location (assignment or temporary venue)
- * when present; fall back to verified geofence / assignment name.
+ * when present; fall back to verified geofence / assignment name / dynamic GPS fix.
  */
 export const getAttendanceLocationLabel = (
   attendance,
@@ -147,5 +147,20 @@ export const getAttendanceLocationLabel = (
   const assignmentName = typeof attendance.assignmentSnapshot?.name === 'string'
     ? attendance.assignmentSnapshot.name.trim()
     : '';
-  return assignmentName || fallback;
+  if (assignmentName) return assignmentName;
+
+  const loc = action === 'checkOut'
+    ? attendance.checkOutLocation
+    : attendance.checkInLocation;
+  if (loc && typeof loc === 'object') {
+    if (typeof loc.address === 'string' && loc.address.trim()) {
+      return loc.address.trim();
+    }
+    const lat = Number(loc.lat);
+    const lng = Number(loc.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+      return `GPS (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+    }
+  }
+  return fallback;
 };

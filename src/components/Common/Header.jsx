@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { logoutUser } from '../../services/auth';
 import { PROJECT, FEATURES } from '../../config/projectConfig';
+import {
+  hasAdminAccess,
+  isMonitorOnlyAdmin,
+  hasDeliverablesAccess,
+} from '../../utils/authorization';
 import ClearCacheButton from './ClearCacheButton';
 
 const Header = ({ user, userData }) => {
@@ -25,6 +30,14 @@ const Header = ({ user, userData }) => {
 
   if (!user || !userData) return null;
 
+  const isAdmin = hasAdminAccess(userData);
+  const isMonitorOnly = isMonitorOnlyAdmin(userData);
+  const roleLabel = isMonitorOnly
+    ? 'Admin Pemantau (Monitor)'
+    : isAdmin
+    ? 'Administrator'
+    : 'Employee';
+
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -40,25 +53,13 @@ const Header = ({ user, userData }) => {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex space-x-8">
-            {userData.role === 'admin' ? (
+            {isAdmin ? (
               <>
                 <button
-                  onClick={() => navigate('/admin/dashboard')}
+                  onClick={() => navigate('/admin')}
                   className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
                 >
                   Dashboard
-                </button>
-                <button
-                  onClick={() => navigate('/admin/employees')}
-                  className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  Employees
-                </button>
-                <button
-                  onClick={() => navigate('/admin/analytics')}
-                  className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  Analytics
                 </button>
               </>
             ) : (
@@ -82,6 +83,15 @@ const Header = ({ user, userData }) => {
                   Profile
                 </button>
               </>
+            )}
+            {hasDeliverablesAccess(userData) && (
+              <button
+                onClick={() => navigate('/deliverables')}
+                className="text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1.5 transition"
+              >
+                <span>📁</span>
+                <span>Deliverables KAK</span>
+              </button>
             )}
           </nav>
 
@@ -132,7 +142,7 @@ const Header = ({ user, userData }) => {
                 <div className="px-4 py-2 text-sm text-gray-700 border-b border-gray-100">
                   <div className="font-medium">{userData.name}</div>
                   <div className="text-gray-500">{userData.email}</div>
-                  <div className="text-gray-500">{userData.role === 'admin' ? 'Administrator' : 'Employee'}</div>
+                  <div className="text-gray-500 font-medium">{roleLabel}</div>
                 </div>
                 <button
                   onClick={() => {
@@ -162,25 +172,13 @@ const Header = ({ user, userData }) => {
         {showMobileNav && (
           <div className="md:hidden border-t border-gray-200 bg-white">
             <div className="px-2 pt-2 pb-3 space-y-1">
-              {userData.role === 'admin' ? (
+              {isAdmin ? (
                 <>
                   <button
-                    onClick={() => handleNavigation('/admin/dashboard')}
+                    onClick={() => handleNavigation('/admin')}
                     className="block w-full text-left px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-50 rounded-md"
                   >
                     Dashboard
-                  </button>
-                  <button
-                    onClick={() => handleNavigation('/admin/employees')}
-                    className="block w-full text-left px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-50 rounded-md"
-                  >
-                    Employees
-                  </button>
-                  <button
-                    onClick={() => handleNavigation('/admin/analytics')}
-                    className="block w-full text-left px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-50 rounded-md"
-                  >
-                    Analytics
                   </button>
                 </>
               ) : (
@@ -229,13 +227,22 @@ const Header = ({ user, userData }) => {
                   )}
                 </>
               )}
+
+              {hasDeliverablesAccess(userData) && (
+                <button
+                  onClick={() => handleNavigation('/deliverables')}
+                  className="block w-full text-left px-3 py-2 text-base font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md mt-1"
+                >
+                  📁 Deliverables KAK (Portal Laporan)
+                </button>
+              )}
               
               {/* Mobile User Info */}
               <div className="pt-4 pb-3 border-t border-gray-200">
                 <div className="px-3 py-2">
                   <div className="text-sm font-medium text-gray-700">{userData.name}</div>
                   <div className="text-xs text-gray-500">{userData.email}</div>
-                  <div className="text-xs text-gray-500">{userData.role === 'admin' ? 'Administrator' : 'Employee'}</div>
+                  <div className="text-xs text-gray-500 font-medium">{roleLabel}</div>
                 </div>
                 <div className="mt-3 space-y-1">
                   <button

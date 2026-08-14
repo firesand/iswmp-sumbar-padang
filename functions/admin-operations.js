@@ -44,7 +44,7 @@ function assertRequest(request, keys) {
 }
 
 function assertActiveAdmin(snapshot) {
-  if (!snapshot.exists) {
+  if (!snapshot || !snapshot.exists) {
     throw callableError(
         "permission-denied",
         "ADMIN_REQUIRED",
@@ -54,11 +54,14 @@ function assertActiveAdmin(snapshot) {
   const user = snapshot.data();
   if (user.accountStatus !== "active" || user.isActive !== true ||
       user.mustChangePassword === true ||
-      (user.role !== "admin" && user.isAdmin !== true)) {
+      (user.role !== "admin" && user.isAdmin !== true) ||
+      user.adminRole === "viewer" || user.adminRole === "monitor" ||
+      user.isViewer === true ||
+      user.role === "admin_viewer" || user.role === "viewer") {
     throw callableError(
         "permission-denied",
         "ADMIN_REQUIRED",
-        "Hanya admin aktif yang dapat melakukan operasi ini.",
+        "Hanya admin pengelola aktif yang dapat melakukan operasi ini.",
     );
   }
   return user;

@@ -58,6 +58,13 @@ import {
   attachEffectiveAttendanceCorrection,
   resolveAttendanceCompletion,
 } from '../../utils/attendanceCorrection';
+import { getAttendanceLocationLabel } from '../../utils/attendanceDisplay';
+import { getGoogleMapsUrl } from '../../utils/attendanceDossier';
+import {
+  hasDeliverablesAccess,
+  isTeamLeader,
+  isDataManagementExpert,
+} from '../../utils/authorization';
 import { PROJECT } from '../../config/projectConfig';
 import ClearCacheButton from '../Common/ClearCacheButton';
 import { compressAttendancePhoto } from '../../utils/compressAttendancePhoto';
@@ -935,6 +942,46 @@ function EmployeeDashboard() {
     </div>
     </div>
 
+    {/* Deliverables Portal Banner for Team Leader & Tenaga Ahli Manajemen Data */}
+    {hasDeliverablesAccess(userData) && (
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white rounded-2xl shadow-lg p-5 mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-2 border-blue-400/30">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl shrink-0">
+            📁
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="bg-yellow-300 text-amber-950 text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                {isTeamLeader(userData)
+                  ? 'Portal Team Leader'
+                  : isDataManagementExpert(userData)
+                  ? 'Tenaga Ahli Manajemen Data'
+                  : 'Portal Deliverables KAK'}
+              </span>
+              <span className="text-xs text-blue-200">
+                PT Surya Abadi Konsultan
+              </span>
+            </div>
+            <h3 className="font-bold text-base md:text-lg text-white mt-0.5">
+              Pengiriman Laporan & Deliverables KAK
+            </h3>
+            <p className="text-xs text-blue-100 mt-0.5">
+              Kelola dan unggah Laporan Pendahuluan, Laporan Bulanan (10 Periode), Triwulanan, Basis Data BNBA, dan Laporan Akhir.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate('/deliverables')}
+          className="w-full md:w-auto px-5 py-2.5 bg-yellow-300 hover:bg-yellow-200 text-amber-950 font-bold text-xs rounded-xl shadow-md transition transform active:scale-95 shrink-0 flex items-center justify-center gap-1.5"
+        >
+          <span>🚀</span>
+          <span>Buka Portal Deliverables</span>
+        </button>
+      </div>
+    )}
+
     {/* Current shift / today's attendance status */}
     <div className="bg-white rounded-xl shadow-md p-6 mb-6">
     <div className="mb-4">
@@ -964,9 +1011,10 @@ function EmployeeDashboard() {
     )}
     </div>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div className="bg-green-50 rounded-lg p-4">
-    <p className="text-sm text-gray-600">Check In</p>
-    <p className="text-xl font-bold text-green-600">
+    <div className="bg-green-50 rounded-lg p-4 flex flex-col justify-between">
+    <div>
+    <p className="text-sm text-gray-600 font-medium">Check In</p>
+    <p className="text-xl font-bold text-green-600 mt-1">
     {attendanceForStatus?.checkIn ? formatTime(attendanceForStatus.checkIn) : 'Belum'}
     </p>
     {attendanceForStatus?.checkIn && (
@@ -975,32 +1023,67 @@ function EmployeeDashboard() {
       </p>
     )}
     {attendanceForStatus?.status && (
-      <span className={`inline-block px-2 py-1 text-xs rounded-full mt-2 ${
+      <span className={`inline-block px-2.5 py-1 text-xs font-semibold rounded-full mt-2 ${
         !attendanceForStatusOperational
         ? 'bg-red-100 text-red-800'
-        : attendanceForStatusLocationPhoto
-          ? 'bg-amber-100 text-amber-900'
         : attendanceForStatus.status === 'ontime'
           ? 'bg-green-100 text-green-800'
-          : 'bg-yellow-100 text-yellow-800'
+          : 'bg-amber-100 text-amber-900'
       }`}>
       {!attendanceForStatusOperational
         ? 'Unverified'
-        : attendanceForStatusLocationPhoto
-          ? 'GPS + foto'
-        : attendanceForStatus.status === 'ontime' ? 'On Time' : 'Late'}
+        : attendanceForStatus.status === 'ontime' ? '✓ On Time (≤ 08:10 WIB)' : '⚠ Terlambat (> 08:10 WIB)'}
       </span>
     )}
     </div>
-    <div className="bg-blue-50 rounded-lg p-4">
-    <p className="text-sm text-gray-600">Check Out</p>
-    <p className="text-xl font-bold text-blue-600">
+
+    {attendanceForStatus?.checkInLocation && (
+      <div className="mt-3 pt-2.5 border-t border-green-200/80 text-xs">
+        <p className="font-semibold text-gray-800 flex items-center gap-1">
+          <span>📍 Lokasi Masuk:</span>
+        </p>
+        <p className="text-gray-700 font-medium mt-0.5">
+          {getAttendanceLocationLabel(attendanceForStatus, { action: 'checkIn' }) || 'Titik GPS'}
+        </p>
+        {attendanceForStatus.checkInLocation.lat != null && attendanceForStatus.checkInLocation.lng != null && (
+          <a
+            href={getGoogleMapsUrl(attendanceForStatus.checkInLocation)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 hover:underline font-mono text-[11px] mt-1 bg-white/80 px-2 py-0.5 rounded border border-green-300"
+            title="Buka lokasi Check-In di Google Maps"
+          >
+            <span>🗺️ {attendanceForStatus.checkInLocation.lat.toFixed(5)}, {attendanceForStatus.checkInLocation.lng.toFixed(5)}</span>
+            {attendanceForStatus.checkInLocation.accuracy != null && (
+              <span className="text-gray-500">±{Math.round(attendanceForStatus.checkInLocation.accuracy)}m</span>
+            )}
+          </a>
+        )}
+      </div>
+    )}
+    </div>
+
+    <div className="bg-blue-50 rounded-lg p-4 flex flex-col justify-between">
+    <div>
+    <p className="text-sm text-gray-600 font-medium">Check Out</p>
+    <p className="text-xl font-bold text-blue-600 mt-1">
     {attendanceCompletion.checkOut
       ? attendanceForStatusIsCrossDay
         ? formatWibDateTime(attendanceCompletion.checkOut)
         : formatTime(attendanceCompletion.checkOut)
       : 'Belum'}
     </p>
+    {attendanceCompletion.checkOut && !attendanceForStatusIsCrossDay && (
+      <span className={`inline-block px-2.5 py-1 text-xs font-semibold rounded-full mt-2 ${
+        attendanceForStatus?.earlyLeave === true
+          ? 'bg-amber-100 text-amber-900'
+          : 'bg-green-100 text-green-800'
+      }`}>
+        {attendanceForStatus?.earlyLeave === true
+          ? '⚠ Pulang Awal (< 16:00 WIB)'
+          : '✓ Pulang Tepat Waktu (≥ 16:00 WIB)'}
+      </span>
+    )}
     {attendanceForStatusIsCrossDay && (
       <span className="mt-2 inline-block rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">
         Checkout lintas hari
@@ -1011,22 +1094,44 @@ function EmployeeDashboard() {
         Koreksi administratif — bukan checkout GPS/selfie terverifikasi
       </span>
     )}
-    {attendanceForStatus?.earlyLeave === true && (
-      <div className="mt-2">
-        <span className="inline-block rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
-          Pulang awal
-        </span>
-        {attendanceForStatusEarlyLeaveReason && (
-          <p className="mt-1 text-xs text-amber-950">
-            Alasan: {attendanceForStatusEarlyLeaveReason}
-          </p>
+    {attendanceForStatus?.earlyLeave === true && attendanceForStatusEarlyLeaveReason && (
+      <div className="mt-2 p-2 bg-amber-100/70 rounded border border-amber-200 text-xs">
+        <span className="font-semibold text-amber-950">Alasan pulang awal:</span>
+        <p className="text-amber-900 mt-0.5">{attendanceForStatusEarlyLeaveReason}</p>
+      </div>
+    )}
+    </div>
+
+    {attendanceForStatus?.checkOutLocation && (
+      <div className="mt-3 pt-2.5 border-t border-blue-200/80 text-xs">
+        <p className="font-semibold text-gray-800 flex items-center gap-1">
+          <span>📍 Lokasi Pulang:</span>
+        </p>
+        <p className="text-gray-700 font-medium mt-0.5">
+          {getAttendanceLocationLabel(attendanceForStatus, { action: 'checkOut' }) || 'Titik GPS'}
+        </p>
+        {attendanceForStatus.checkOutLocation.lat != null && attendanceForStatus.checkOutLocation.lng != null && (
+          <a
+            href={getGoogleMapsUrl(attendanceForStatus.checkOutLocation)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 hover:underline font-mono text-[11px] mt-1 bg-white/80 px-2 py-0.5 rounded border border-blue-300"
+            title="Buka lokasi Check-Out di Google Maps"
+          >
+            <span>🗺️ {attendanceForStatus.checkOutLocation.lat.toFixed(5)}, {attendanceForStatus.checkOutLocation.lng.toFixed(5)}</span>
+            {attendanceForStatus.checkOutLocation.accuracy != null && (
+              <span className="text-gray-500">±{Math.round(attendanceForStatus.checkOutLocation.accuracy)}m</span>
+            )}
+          </a>
         )}
       </div>
     )}
     </div>
-    <div className="bg-purple-50 rounded-lg p-4">
-    <p className="text-sm text-gray-600">Work Hours</p>
-    <p className="text-xl font-bold text-purple-600">
+
+    <div className="bg-purple-50 rounded-lg p-4 flex flex-col justify-between">
+    <div>
+    <p className="text-sm text-gray-600 font-medium">Work Hours</p>
+    <p className="text-xl font-bold text-purple-600 mt-1">
     {attendanceForStatusOperational &&
     attendanceCompletion.isComplete &&
     attendanceCompletion.workHours != null
@@ -1034,10 +1139,15 @@ function EmployeeDashboard() {
       : '-'}
     </p>
     </div>
+    <div className="mt-3 pt-2 text-xs text-gray-500 border-t border-purple-200/60">
+      <p>Jam kerja normal: 08:00 - 16:00 WIB</p>
+      <p>Check-in on-time: maks 08:10 WIB</p>
+    </div>
+    </div>
     </div>
 
     {/* Check In/Out Buttons */}
-    <div className="mt-6 flex gap-4">
+    <div id="attendance-action-section" className="mt-6 flex gap-4">
     {attendanceLoadError ? (
       <div className="flex-1 rounded-lg border border-red-200 bg-red-50 px-6 py-3 text-center text-red-800">
         <p className="font-semibold">Status shift tidak dapat diverifikasi</p>
@@ -1370,6 +1480,7 @@ function EmployeeDashboard() {
     <th className="text-left py-2 px-2 text-sm font-medium text-gray-600">Check In</th>
     <th className="text-left py-2 px-2 text-sm font-medium text-gray-600">Check Out</th>
     <th className="text-left py-2 px-2 text-sm font-medium text-gray-600">Status</th>
+    <th className="text-left py-2 px-2 text-sm font-medium text-gray-600">Lokasi</th>
     <th className="text-left py-2 px-2 text-sm font-medium text-gray-600">Work Hours</th>
     </tr>
     </thead>
@@ -1382,9 +1493,11 @@ function EmployeeDashboard() {
           ...record,
           checkOut: completion.checkOut,
         };
+        const inLocLabel = getAttendanceLocationLabel(record, { action: 'checkIn' });
+        const outLocLabel = getAttendanceLocationLabel(record, { action: 'checkOut' });
         return (
         <tr key={record.id} className="border-b">
-        <td className="py-2 px-2 text-sm">
+        <td className="py-2 px-2 text-sm whitespace-nowrap">
         {formatWibDate(record.date, {
           weekday: 'short',
           day: 'numeric',
@@ -1415,16 +1528,12 @@ function EmployeeDashboard() {
         <span className={`inline-block px-2 py-1 text-xs rounded-full ${
           !isAttendanceWorkflowEligible(record)
           ? 'bg-red-100 text-red-800'
-          : isLocationPhotoAttendance(record)
-            ? 'bg-amber-100 text-amber-900'
           : record.status === 'ontime'
             ? 'bg-green-100 text-green-800'
             : 'bg-yellow-100 text-yellow-800'
         }`}>
         {!isAttendanceWorkflowEligible(record)
           ? 'Unverified'
-          : isLocationPhotoAttendance(record)
-            ? 'GPS + foto'
           : record.status === 'ontime' ? 'On Time' : 'Late'}
         </span>
         {record.earlyLeave === true && (
@@ -1440,7 +1549,40 @@ function EmployeeDashboard() {
           </div>
         )}
         </td>
-        <td className="py-2 px-2 text-sm">
+        <td className="py-2 px-2 text-xs">
+          {inLocLabel && (
+            <div className="text-gray-700">
+              <span className="text-gray-500 text-[11px]">Masuk: </span>
+              {record.checkInLocation?.lat ? (
+                <a
+                  href={getGoogleMapsUrl(record.checkInLocation)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline inline-flex items-center gap-0.5"
+                >
+                  {inLocLabel}
+                </a>
+              ) : inLocLabel}
+            </div>
+          )}
+          {outLocLabel && (
+            <div className="text-gray-700 mt-0.5">
+              <span className="text-gray-500 text-[11px]">Pulang: </span>
+              {record.checkOutLocation?.lat ? (
+                <a
+                  href={getGoogleMapsUrl(record.checkOutLocation)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline inline-flex items-center gap-0.5"
+                >
+                  {outLocLabel}
+                </a>
+              ) : outLocLabel}
+            </div>
+          )}
+          {!inLocLabel && !outLocLabel && '-'}
+        </td>
+        <td className="py-2 px-2 text-sm whitespace-nowrap">
         {isAttendanceWorkflowEligible(record) && completion.isComplete
           ? `${completion.workHours}h`
           : '-'}
@@ -1450,7 +1592,7 @@ function EmployeeDashboard() {
       })
     ) : (
       <tr>
-      <td colSpan="5" className="text-center py-4 text-gray-500">
+      <td colSpan="6" className="text-center py-4 text-gray-500">
       No attendance records found
       </td>
       </tr>

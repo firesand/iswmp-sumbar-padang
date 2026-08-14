@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { hasAdminAccess } from '../../utils/authorization';
+import { hasAdminAccess, isMonitorOnlyAdmin, canManageAdminOperations } from '../../utils/authorization';
 import {
   getPendingPayrollRequests,
   approvePayrollRequest,
@@ -14,6 +14,8 @@ import {
 
 function PayrollManagement() {
   const [userData, setUserData] = useState(null);
+  const isMonitorOnly = isMonitorOnlyAdmin(userData);
+  const canManage = canManageAdminOperations(userData);
   const [loading, setLoading] = useState(true);
   const [payrollRequests, setPayrollRequests] = useState([]);
   const [processingId, setProcessingId] = useState(null);
@@ -57,12 +59,20 @@ function PayrollManagement() {
   }, []);
 
   const handleApproveRequest = async (request) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau tidak dapat menyetujui payroll.');
+      return;
+    }
     setProcessingId(request.id);
     setSelectedRequest(request);
     setShowPayrollModal(true);
   };
 
   const handleRejectRequest = async (request) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau tidak dapat menolak payroll.');
+      return;
+    }
     setRejectingId(request.id);
     setSelectedRequest(request);
     setShowRejectModal(true);
@@ -332,22 +342,26 @@ function PayrollManagement() {
                         {formatDate(request.requestedAt)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleApproveRequest(request)}
-                            disabled={processingId === request.id}
-                            className="text-green-600 hover:text-green-900 disabled:opacity-50"
-                          >
-                            {processingId === request.id ? 'Processing...' : 'Approve'}
-                          </button>
-                          <button
-                            onClick={() => handleRejectRequest(request)}
-                            disabled={processingId === request.id}
-                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                          >
-                            Reject
-                          </button>
-                        </div>
+                        {isMonitorOnly ? (
+                          <span className="text-xs text-gray-400 italic">Lihat Saja</span>
+                        ) : (
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleApproveRequest(request)}
+                              disabled={processingId === request.id}
+                              className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                            >
+                              {processingId === request.id ? 'Processing...' : 'Approve'}
+                            </button>
+                            <button
+                              onClick={() => handleRejectRequest(request)}
+                              disabled={processingId === request.id}
+                              className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))

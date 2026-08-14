@@ -12,7 +12,21 @@ service cloud.firestore {
 
     function isAdmin() {
       return isActiveUser() &&
-        (userDoc().data.role == 'admin' || userDoc().data.isAdmin == true);
+        (userDoc().data.role == 'admin'
+          || (userDoc().data.keys().hasAny(['isAdmin'])
+            && userDoc().data.isAdmin == true)
+          || userDoc().data.role == 'admin_viewer'
+          || userDoc().data.role == 'viewer');
+    }
+
+    function isFullAdmin() {
+      return isAdmin()
+        && (!userDoc().data.keys().hasAny(['adminRole'])
+            || (userDoc().data.adminRole != 'viewer' && userDoc().data.adminRole != 'monitor'))
+        && (!userDoc().data.keys().hasAny(['isViewer'])
+            || userDoc().data.isViewer != true)
+        && userDoc().data.role != 'admin_viewer'
+        && userDoc().data.role != 'viewer';
     }
 
     function isActiveUser() {
@@ -21,6 +35,36 @@ service cloud.firestore {
         && userDoc().data.isActive == true
         && (!userDoc().data.keys().hasAny(['mustChangePassword'])
             || userDoc().data.mustChangePassword == false);
+    }
+
+    function hasDeliverablesOfficeRole() {
+      let d = userDoc().data;
+      return isActiveUser()
+        && d.role == 'office_staff'
+        && d.assignmentType == 'kantor'
+        && d.kantorId == 'kantor-padang-kota'
+        && d.peranKantor in [
+          'TEAM_LEADER', 'TA_DATA_MANAGEMENT', 'KORKOT', 'ASMAN_DATA'
+        ];
+    }
+
+    function hasDeliverablesWriteRole() {
+      let d = userDoc().data;
+      return isActiveUser()
+        && d.role == 'office_staff'
+        && d.assignmentType == 'kantor'
+        && d.kantorId == 'kantor-padang-kota'
+        && d.peranKantor in [
+          'TEAM_LEADER', 'TA_DATA_MANAGEMENT', 'KORKOT', 'ASMAN_DATA'
+        ];
+    }
+
+    function canReadDeliverables() {
+      return isAdmin() || hasDeliverablesOfficeRole();
+    }
+
+    function canWriteDeliverables() {
+      return isFullAdmin() || hasDeliverablesWriteRole();
     }
 
     function ownsCanonicalAttendance(attendanceId) {
@@ -51,6 +95,7 @@ service cloud.firestore {
           /databases/$(database)/documents/kantor/$(d.kantorId)
         ).data.nama is string
         && d.peranKantor in [
+          'TEAM_LEADER', 'TA_DATA_MANAGEMENT',
           'KORKOT', 'ASMAN_DATA', 'OPERATOR', 'OFFICE_BOY'
         ]
         && !d.keys().hasAny([
@@ -370,6 +415,186 @@ service cloud.firestore {
         && d.status == 'pending';
     }
 
+    function isValidDeliverableSubmission(deliverableId) {
+      let d = request.resource.data;
+      let actor = d.updatedBy;
+      return d.keys().hasOnly([
+          'deliverableId', 'code', 'registrationNumber', 'status',
+          'scopeChecklist', 'notes', 'driveUrl', 'videoUrl',
+          'activityDate', 'activityLocation', 'attendeesCount', 'speakers',
+          'discussionDate', 'discussionNotes', 'files', 'storagePaths',
+          'revision',
+          'submittedBy', 'submittedAt', 'lastUpdatedAt', 'updatedBy'
+        ])
+        && d.keys().hasAll([
+          'deliverableId', 'code', 'registrationNumber', 'status',
+          'scopeChecklist', 'files', 'storagePaths', 'revision',
+          'lastUpdatedAt', 'updatedBy'
+        ])
+        && d.deliverableId == deliverableId
+        && deliverableId.matches('^[a-z0-9_]{1,100}$')
+        && d.code is string
+        && d.code.size() > 0
+        && d.code.size() <= 50
+        && d.registrationNumber is string
+        && d.registrationNumber.size() > 0
+        && d.registrationNumber.size() <= 200
+        && d.status in ['draft', 'submitted', 'review', 'approved']
+        && d.scopeChecklist is map
+        && d.scopeChecklist.size() <= 100
+        && d.files is list
+        && d.files.size() <= 100
+        && d.storagePaths is list
+        && d.storagePaths.size() <= 100
+        && d.revision is int
+        && d.revision > 0
+        && (!d.keys().hasAny(['notes'])
+            || (d.notes is string && d.notes.size() <= 20000))
+        && (!d.keys().hasAny(['driveUrl'])
+            || (d.driveUrl is string && d.driveUrl.size() <= 2048))
+        && (!d.keys().hasAny(['videoUrl'])
+            || (d.videoUrl is string && d.videoUrl.size() <= 2048))
+        && (!d.keys().hasAny(['activityDate'])
+            || (d.activityDate is string && d.activityDate.size() <= 64))
+        && (!d.keys().hasAny(['activityLocation'])
+            || (d.activityLocation is string
+                && d.activityLocation.size() <= 500))
+        && (!d.keys().hasAny(['attendeesCount'])
+            || (d.attendeesCount is string
+                && d.attendeesCount.size() <= 20))
+        && (!d.keys().hasAny(['speakers'])
+            || (d.speakers is string && d.speakers.size() <= 2000))
+        && (!d.keys().hasAny(['discussionDate'])
+            || (d.discussionDate is string
+                && d.discussionDate.size() <= 64))
+        && (!d.keys().hasAny(['discussionNotes'])
+            || (d.discussionNotes is string
+                && d.discussionNotes.size() <= 20000))
+        && (!d.keys().hasAny(['submittedBy'])
+            || d.submittedBy == null
+            || (d.submittedBy is string && d.submittedBy.size() <= 500))
+        && (!d.keys().hasAny(['submittedAt'])
+            || d.submittedAt == null
+            || d.submittedAt is timestamp
+            || (d.submittedAt is string && d.submittedAt.size() <= 64))
+        && (!(d.status in ['submitted', 'approved'])
+            || (d.submittedBy is string
+                && d.submittedBy.size() > 0
+                && (d.submittedAt is timestamp
+                    || (d.submittedAt is string
+                        && d.submittedAt.size() > 0))))
+        && d.lastUpdatedAt == request.time
+        && actor is map
+        && actor.keys().hasOnly(['uid', 'name', 'email', 'role'])
+        && actor.keys().hasAll(['uid', 'name', 'email', 'role'])
+        && actor.uid == request.auth.uid
+        && actor.name is string
+        && actor.name.size() > 0
+        && actor.name.size() <= 500
+        && actor.email is string
+        && actor.email.size() <= 320
+        && actor.role is string
+        && actor.role.size() > 0
+        && actor.role.size() <= 100;
+    }
+
+    function isValidPublicDeliverable(deliverableId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'deliverableId', 'code', 'registrationNumber', 'status',
+          'scopeChecklist', 'videoUrl', 'activityDate', 'activityLocation',
+          'attendeesCount', 'speakers', 'discussionDate', 'discussionNotes',
+          'files', 'storagePaths', 'submittedBy', 'submittedAt', 'lastUpdatedAt'
+        ])
+        && d.keys().hasAll([
+          'deliverableId', 'code', 'registrationNumber', 'status',
+          'scopeChecklist', 'videoUrl', 'activityDate', 'activityLocation',
+          'attendeesCount', 'speakers', 'discussionDate', 'discussionNotes',
+          'files', 'storagePaths', 'submittedBy', 'submittedAt', 'lastUpdatedAt'
+        ])
+        && d.deliverableId == deliverableId
+        && deliverableId.matches('^[a-z0-9_]{1,100}$')
+        && d.code is string
+        && d.code.size() > 0
+        && d.code.size() <= 50
+        && d.registrationNumber is string
+        && d.registrationNumber.size() > 0
+        && d.registrationNumber.size() <= 200
+        && d.status in ['submitted', 'approved']
+        && d.scopeChecklist is map
+        && d.scopeChecklist.size() <= 100
+        && d.videoUrl is string
+        && d.videoUrl.size() <= 2048
+        && d.activityDate is string
+        && d.activityDate.size() <= 64
+        && d.activityLocation is string
+        && d.activityLocation.size() <= 500
+        && d.attendeesCount is string
+        && d.attendeesCount.size() <= 20
+        && d.speakers is string
+        && d.speakers.size() <= 2000
+        && d.discussionDate is string
+        && d.discussionDate.size() <= 64
+        && d.discussionNotes is string
+        && d.discussionNotes.size() <= 20000
+        && d.files is list
+        && d.files.size() <= 100
+        && d.storagePaths is list
+        && d.storagePaths.size() <= 100
+        && d.submittedBy is string
+        && d.submittedBy.size() > 0
+        && d.submittedBy.size() <= 500
+        && (d.submittedAt is timestamp
+            || (d.submittedAt is string
+                && d.submittedAt.size() > 0
+                && d.submittedAt.size() <= 64))
+        && d.lastUpdatedAt == request.time;
+    }
+
+    function isValidDeliverableUploadReservationCreate(uploadId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'uploadId', 'deliverableId', 'storagePath', 'uploadedBy',
+          'status', 'createdAt', 'expiresAt'
+        ])
+        && d.keys().hasAll([
+          'uploadId', 'deliverableId', 'storagePath', 'uploadedBy',
+          'status', 'createdAt', 'expiresAt'
+        ])
+        && d.uploadId == uploadId
+        && uploadId.matches('^[A-Za-z0-9_-]{16,80}$')
+        && d.deliverableId.matches('^[a-z0-9_]{1,100}$')
+        && d.storagePath.matches(
+          '^deliverables/' + d.deliverableId +
+          '/[A-Za-z0-9][A-Za-z0-9._-]{0,180}$'
+        )
+        && d.uploadedBy == request.auth.uid
+        && d.status == 'pending'
+        && d.createdAt == request.time
+        && d.expiresAt is timestamp
+        && d.expiresAt > request.time
+        && d.expiresAt <= request.time + duration.value(1, 'h');
+    }
+
+    function isValidDeliverableUploadReservationCommit() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let submissionAfter = getAfter(
+        /databases/$(database)/documents/deliverables_submissions/$(before.deliverableId)
+      ).data;
+      return before.uploadedBy == request.auth.uid
+        && before.status == 'pending'
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'committedAt'
+        ])
+        && after.status == 'committed'
+        && after.committedAt == request.time
+        && submissionAfter.deliverableId == before.deliverableId
+        && submissionAfter.lastUpdatedAt == request.time
+        && submissionAfter.storagePaths is list
+        && before.storagePath in submissionAfter.storagePaths;
+    }
+
     // Attendance geofences are security policy, not ordinary master data.
     // Even an application-level admin must not be able to move a coordinate,
     // self-assert field verification, or enlarge a radius from the browser.
@@ -400,13 +625,14 @@ service cloud.firestore {
 
       allow create: if isSignedIn() &&
                        ((request.auth.uid == userId && isValidUserCreate(userId))
-                         || (isAdmin() && isValidAdminUserCreate(userId)));
+                         || (isFullAdmin() && isValidAdminUserCreate(userId)));
 
       allow update: if isSignedIn() &&
                        ((request.auth.uid == userId
                            && isActiveUser()
+                           && (!isAdmin() || isFullAdmin())
                            && isValidSelfUserUpdate())
-                         || (isAdmin() && isValidAdminUserUpdate()));
+                         || (isFullAdmin() && isValidAdminUserUpdate()));
 
       // Employee offboarding is an audited archive operation in a callable;
       // client-side hard deletion would orphan payroll/attendance evidence.
@@ -416,8 +642,9 @@ service cloud.firestore {
     // Registration requests - users can create, admins manage
     match /registrationRequests/{requestId} {
       allow create: if (isSignedIn() && isValidRegistrationCreate(requestId))
-                      || isAdmin();
-      allow read, update, delete: if isAdmin();
+                      || isFullAdmin();
+      allow read: if isAdmin();
+      allow update, delete: if isFullAdmin();
     }
 
     // Authentication accounts whose registration profile was never saved.
@@ -429,12 +656,12 @@ service cloud.firestore {
       // A browser admin must not be able to forge its own recovery prerequisite.
       allow create, update: if false;
       allow delete: if (isSignedIn() && request.auth.uid == userId)
-        || (isAdmin() && isValidAdminRecoveryQueueDelete(userId));
+        || (isFullAdmin() && isValidAdminRecoveryQueueDelete(userId));
     }
 
     // Immutable audit trail for every admin-assisted registration recovery.
     match /recoveryAuditLogs/{logId} {
-      allow create: if isAdmin() && isValidRecoveryAuditCreate(logId);
+      allow create: if isFullAdmin() && isValidRecoveryAuditCreate(logId);
       allow read: if isAdmin();
       allow update, delete: if false;
     }
@@ -559,9 +786,50 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Private deliverable working records. Monitor/viewer accounts may read,
+    // but only a full admin or an approved deliverable office role may
+    // create/update. Every write records the authenticated actor and server
+    // timestamp; hard deletion is intentionally unavailable to web clients.
+    match /deliverables_submissions/{deliverableId} {
+      allow read: if canReadDeliverables();
+      allow create: if canWriteDeliverables()
+        && isValidDeliverableSubmission(deliverableId)
+        && request.resource.data.revision == 1;
+      allow update: if canWriteDeliverables()
+        && isValidDeliverableSubmission(deliverableId)
+        && resource.data.revision is int
+        && request.resource.data.revision == resource.data.revision + 1;
+      allow delete: if false;
+    }
+
+    // PII-free projection used by the intentionally shareable document route.
+    // Only submitted/approved records exist here; publication/unpublication is
+    // committed atomically with the private record by the client batch.
+    match /deliverables_public/{deliverableId} {
+      allow read: if resource.data.status in ['submitted', 'approved'];
+      allow create, update: if canWriteDeliverables()
+        && isValidPublicDeliverable(deliverableId);
+      allow delete: if canWriteDeliverables();
+    }
+
+    // Uploads are reserved before Storage accepts bytes. Submission metadata
+    // and the pending -> committed transition are written in one batch, so a
+    // committed file can never use the rollback permission in Storage rules.
+    match /deliverable_uploadReservations/{uploadId} {
+      allow create: if canWriteDeliverables()
+        && isValidDeliverableUploadReservationCreate(uploadId);
+      allow read: if canWriteDeliverables()
+        && (resource.data.uploadedBy == request.auth.uid || isFullAdmin());
+      allow update: if canWriteDeliverables()
+        && isValidDeliverableUploadReservationCommit();
+      allow delete: if canWriteDeliverables()
+        && resource.data.uploadedBy == request.auth.uid
+        && resource.data.status == 'pending';
+    }
+
     // Deletion logs (audit trail) - immutable, admin only
     match /deletionLogs/{logId} {
-      allow create: if isAdmin();
+      allow create: if isFullAdmin();
       allow read: if isAdmin();
       allow update, delete: if false;
     }
@@ -571,13 +839,13 @@ service cloud.firestore {
       // The public registration page must be able to detect mandatory client
       // updates. Other application configuration remains login-only.
       allow read: if configId == 'version' || isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isFullAdmin();
     }
 
     // Notifications
     match /notifications/{notificationId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isFullAdmin();
     }
 
     // Default deny

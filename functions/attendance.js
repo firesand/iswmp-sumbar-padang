@@ -21,13 +21,20 @@ const PERCEPTUAL_AUDIT_SCHEMA_VERSION = 3;
 const OPEN_SHIFT_SCHEMA_VERSION = 1;
 const MIN_SHIFT_DURATION_MINUTES = 60;
 const MAX_SHIFT_DURATION_MINUTES = 24 * 60;
-const EARLY_LEAVE_THRESHOLD_HOUR_WIB = 17;
+const EARLY_LEAVE_THRESHOLD_HOUR_WIB = 16;
 const EARLY_LEAVE_REASON_MIN_LENGTH = 5;
 const EARLY_LEAVE_REASON_MAX_LENGTH = 300;
 const VERIFICATION_MODE_GEOFENCE_ONSITE = "geofence_onsite";
 const VERIFICATION_MODE_LOCATION_PHOTO = "location_photo";
 const LOCATION_PHOTO_MODE_POLICY_VERSION = 1;
+// Policy 2 makes location_photo the standing mode: no expiry, but only with
+// an explicit, recorded risk acceptance (who decided, when, and why).
+const LOCATION_PHOTO_MODE_PERMANENT_POLICY_VERSION = 2;
 const MAX_LOCATION_PHOTO_MODE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const LOCATION_PHOTO_PERMANENT_ACCEPTED_BY_MIN_LENGTH = 3;
+const LOCATION_PHOTO_PERMANENT_ACCEPTED_BY_MAX_LENGTH = 120;
+const LOCATION_PHOTO_PERMANENT_REASON_MIN_LENGTH = 8;
+const LOCATION_PHOTO_PERMANENT_REASON_MAX_LENGTH = 500;
 const LOCATION_PHOTO_PROOF_REASON = "policy_location_photo";
 const GPS_TRACE_COLLECTION = "attendanceGpsTraces";
 const GPS_TRACE_DIGEST_COLLECTION = "attendanceGpsTraceDigests";
@@ -246,6 +253,44 @@ function timestampMillis(value) {
     value.toMillis() : NaN;
 }
 
+/**
+ * Permanent (policy v2) risk acceptance for location_photo mode. The mode no
+ * longer expires, so the acceptance must be explicit and attributable: who
+ * accepted the residual risk, when, and why. Any missing, malformed, or
+ * contradictory field fails closed.
+ */
+function locationPhotoPermanentAcceptance(config, enabledAtMs, nowMs) {
+  const acceptance = config.locationPhotoModePermanent;
+  if (!acceptance || typeof acceptance !== "object" ||
+      Array.isArray(acceptance)) {
+    throw callableError(
+        "failed-precondition",
+        "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+        "Penerimaan risiko permanen mode lokasi dan foto tidak valid.",
+    );
+  }
+  const acceptedBy = typeof acceptance.acceptedBy === "string" ?
+    acceptance.acceptedBy.trim() : "";
+  const reason = typeof acceptance.reason === "string" ?
+    acceptance.reason.trim() : "";
+  const acceptedAtMs = timestampMillis(acceptance.acceptedAt);
+  if (acceptedBy.length < LOCATION_PHOTO_PERMANENT_ACCEPTED_BY_MIN_LENGTH ||
+      acceptedBy.length > LOCATION_PHOTO_PERMANENT_ACCEPTED_BY_MAX_LENGTH ||
+      reason.length < LOCATION_PHOTO_PERMANENT_REASON_MIN_LENGTH ||
+      reason.length > LOCATION_PHOTO_PERMANENT_REASON_MAX_LENGTH ||
+      !Number.isFinite(acceptedAtMs) ||
+      acceptedAtMs <= 0 ||
+      acceptedAtMs > nowMs ||
+      acceptedAtMs < enabledAtMs) {
+    throw callableError(
+        "failed-precondition",
+        "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+        "Penerimaan risiko permanen mode lokasi dan foto tidak valid.",
+    );
+  }
+  return {acceptedBy, acceptedAtMs, reason};
+}
+
 function attendanceVerificationPolicy(
     config,
     nowMs = Date.now(),
@@ -280,15 +325,38 @@ function attendanceVerificationPolicy(
   const allowCheckoutGrace = options.allowCheckoutGrace === true &&
     Number.isFinite(maximumShiftDurationMs) &&
     maximumShiftDurationMs > 0;
-  if (config.locationPhotoModePolicyVersion !==
-        LOCATION_PHOTO_MODE_POLICY_VERSION ||
+  const policyVersion = config.locationPhotoModePolicyVersion;
+  const permanent =
+    policyVersion === LOCATION_PHOTO_MODE_PERMANENT_POLICY_VERSION;
+  if (!Number.isInteger(policyVersion) ||
+      (policyVersion !== LOCATION_PHOTO_MODE_POLICY_VERSION && !permanent) ||
       !Number.isFinite(nowMs) ||
       !Number.isFinite(enabledAtMs) ||
-      !Number.isFinite(expiresAtMs) ||
       enabledAtMs <= 0 ||
-      enabledAtMs > nowMs ||
+      enabledAtMs > nowMs) {
+    throw callableError(
+        "failed-precondition",
+        "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+        "Kebijakan mode lokasi dan foto tidak valid.",
+    );
+  }
+  if (permanent) {
+    // A permanent policy must not also carry an expiry: an ambiguous policy
+    // fails closed rather than silently picking one interpretation.
+    if (config.locationPhotoModeExpiresAt != null) {
+      throw callableError(
+          "failed-precondition",
+          "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+          "Kebijakan mode lokasi dan foto tidak valid.",
+      );
+    }
+    locationPhotoPermanentAcceptance(config, enabledAtMs, nowMs);
+  } else if (!Number.isFinite(expiresAtMs) ||
       expiresAtMs <= enabledAtMs ||
-      expiresAtMs - enabledAtMs > MAX_LOCATION_PHOTO_MODE_DURATION_MS) {
+      expiresAtMs - enabledAtMs > MAX_LOCATION_PHOTO_MODE_DURATION_MS ||
+      config.locationPhotoModePermanent != null) {
+    // A time-boxed policy carrying a stale permanent acceptance is just as
+    // ambiguous as the reverse; fail closed either way.
     throw callableError(
         "failed-precondition",
         "ATTENDANCE_VERIFICATION_POLICY_INVALID",
@@ -328,10 +396,11 @@ function attendanceVerificationPolicy(
         "Daftar lokasi operasional sementara tidak valid.",
     );
   }
-  const checkoutGrace = expiresAtMs <= nowMs &&
+  const checkoutGrace = !permanent &&
+    expiresAtMs <= nowMs &&
     allowCheckoutGrace &&
     nowMs <= expiresAtMs + maximumShiftDurationMs;
-  if (expiresAtMs <= nowMs && !checkoutGrace) {
+  if (!permanent && expiresAtMs <= nowMs && !checkoutGrace) {
     throw callableError(
         "failed-precondition",
         "LOCATION_PHOTO_MODE_EXPIRED",
@@ -341,9 +410,9 @@ function attendanceVerificationPolicy(
   return {
     verificationMode: VERIFICATION_MODE_LOCATION_PHOTO,
     policySecurityVersion: 2,
-    locationPhotoModePolicyVersion: LOCATION_PHOTO_MODE_POLICY_VERSION,
+    locationPhotoModePolicyVersion: policyVersion,
     enabledAtMs,
-    expiresAtMs,
+    expiresAtMs: permanent ? null : expiresAtMs,
     checkoutGrace,
     allowedLocations,
     allowedLocationsVersion,
@@ -668,15 +737,22 @@ function normalizedChallengePolicy(challenge) {
     challenge?.locationPhotoAllowedLocationsVersion;
   const allowedLocationsDigest =
     challenge?.locationPhotoAllowedLocationsDigest;
+  const policyVersion = challenge?.locationPhotoModePolicyVersion;
+  const permanent =
+    policyVersion === LOCATION_PHOTO_MODE_PERMANENT_POLICY_VERSION;
+  const timeBoxedWindowValid = !permanent &&
+    Number.isFinite(expiresAtMs) &&
+    expiresAtMs > enabledAtMs &&
+    expiresAtMs - enabledAtMs <= MAX_LOCATION_PHOTO_MODE_DURATION_MS;
+  const permanentWindowValid = permanent &&
+    challenge?.locationPhotoModeExpiresAt == null;
   if (rawMode !== VERIFICATION_MODE_LOCATION_PHOTO ||
       challenge.policySecurityVersion !== 2 ||
-      challenge.locationPhotoModePolicyVersion !==
-        LOCATION_PHOTO_MODE_POLICY_VERSION ||
+      !Number.isInteger(policyVersion) ||
+      (policyVersion !== LOCATION_PHOTO_MODE_POLICY_VERSION && !permanent) ||
       !Number.isFinite(enabledAtMs) ||
-      !Number.isFinite(expiresAtMs) ||
       enabledAtMs <= 0 ||
-      expiresAtMs <= enabledAtMs ||
-      expiresAtMs - enabledAtMs > MAX_LOCATION_PHOTO_MODE_DURATION_MS ||
+      (!timeBoxedWindowValid && !permanentWindowValid) ||
       !Number.isInteger(allowedLocationsVersion) ||
       allowedLocationsVersion < 0 ||
       typeof allowedLocationsDigest !== "string" ||
@@ -690,9 +766,9 @@ function normalizedChallengePolicy(challenge) {
   return {
     verificationMode: VERIFICATION_MODE_LOCATION_PHOTO,
     policySecurityVersion: 2,
-    locationPhotoModePolicyVersion: LOCATION_PHOTO_MODE_POLICY_VERSION,
+    locationPhotoModePolicyVersion: policyVersion,
     enabledAtMs,
-    expiresAtMs,
+    expiresAtMs: permanent ? null : expiresAtMs,
     allowedLocationsVersion,
     allowedLocationsDigest,
   };
@@ -1586,13 +1662,6 @@ function createAttendanceHandlers(admin) {
           );
           assignmentSnapshot = operational.assignmentSnapshot;
           allowedLocationsPublic = operational.publicLocations;
-          if (allowedLocationsPublic.length < 1) {
-            throw callableError(
-                "failed-precondition",
-                "OPERATIONAL_LOCATION_UNAVAILABLE",
-                "Tidak ada lokasi operasional yang dapat dipakai untuk absensi.",
-            );
-          }
         }
 
         const existingShift = openShiftSnapshot.exists ?
@@ -2293,17 +2362,24 @@ function createAttendanceHandlers(admin) {
               location,
               operational.candidates,
           );
-          if (!operationalMatch) {
-            throw callableError(
-                "failed-precondition",
-                "OUTSIDE_OPERATIONAL_LOCATION",
-                "Posisi GPS beserta margin akurasinya berada di luar " +
-                  "lokasi operasional yang diizinkan.",
+          if (operationalMatch) {
+            operationalSnapshotData = operationalLocationSnapshotData(
+                operationalMatch,
             );
+          } else {
+            operationalSnapshotData = {
+              id: "dynamic",
+              name: `Lokasi Dinamis (${location.lat.toFixed(5)}, ${location.lng.toFixed(5)})`,
+              lat: location.lat,
+              lng: location.lng,
+              radius: null,
+              source: "dynamic",
+              collection: null,
+              assignmentId: null,
+              distanceMeters: null,
+              uncertaintyAdjustedDistanceMeters: null,
+            };
           }
-          operationalSnapshotData = operationalLocationSnapshotData(
-              operationalMatch,
-          );
           presenceVerification = {
             proof: {
               required: false,
@@ -2727,7 +2803,8 @@ function createAttendanceHandlers(admin) {
       }
       const user = userSnapshot.data();
       const attendance = attendanceSnapshot.data();
-      const isAdmin = user.role === "admin" || user.isAdmin === true;
+      const isAdmin = user.role === "admin" || user.isAdmin === true ||
+          user.role === "admin_viewer" || user.role === "viewer";
       if (!isAdmin && attendance.userId !== uid) {
         throw callableError(
             "permission-denied",
@@ -2868,6 +2945,7 @@ module.exports = {
   EARLY_LEAVE_REASON_MAX_LENGTH,
   EARLY_LEAVE_REASON_MIN_LENGTH,
   EARLY_LEAVE_THRESHOLD_HOUR_WIB,
+  LOCATION_PHOTO_MODE_PERMANENT_POLICY_VERSION,
   LOCATION_PHOTO_MODE_POLICY_VERSION,
   MAX_LOCATION_PHOTO_MODE_DURATION_MS,
   VERIFICATION_MODE_GEOFENCE_ONSITE,

@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const sharp = require("sharp");
 
 const WIB_TIME_ZONE = "Asia/Jakarta";
-const DEFAULT_DEADLINE = "08:00";
+const DEFAULT_DEADLINE = "08:10";
 const MAX_LOCATION_AGE_MS = 2 * 60 * 1000;
 const MAX_LOCATION_FUTURE_SKEW_MS = 10 * 1000;
 const MAX_LOCATION_ACCURACY_METERS = 100;
@@ -113,7 +113,7 @@ function getServerAttendanceStamp(date, deadlineValue) {
   const deadlineMinutes = deadlineHour * 60 + deadlineMinute;
   return {
     date: parts.date,
-    status: currentMinutes >= deadlineMinutes ? "late" : "ontime",
+    status: currentMinutes > deadlineMinutes ? "late" : "ontime",
     deadline,
     timeZone: WIB_TIME_ZONE,
   };

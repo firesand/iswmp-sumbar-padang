@@ -18,7 +18,8 @@ import {
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import MonthlyReports from './MonthlyReports';
+import ReportsWorkspace from './ReportsWorkspace';
+import PeriodRecap from './PeriodRecap';
 import {
   notifyApprovalViaWhatsApp,
   sendWhatsAppDirect,
@@ -38,12 +39,13 @@ import IncompleteRegistrations from './IncompleteRegistrations';
 import OnsitePresenceCode from './OnsitePresenceCode';
 import GeofenceVerificationPanel from './GeofenceVerificationPanel';
 import AttendanceCorrectionPanel from './AttendanceCorrectionPanel';
+import DeliverablesHub from '../Deliverables/DeliverablesHub';
 import {
   ADMIN_CONFIG,
   PRIVATE_ATTENDANCE_NOTICE_ADMIN_UID,
   validateAdminConfig,
 } from '../../config/adminConfig';
-import { hasAdminAccess } from '../../utils/authorization';
+import { hasAdminAccess, isMonitorOnlyAdmin, canManageAdminOperations } from '../../utils/authorization';
 import {
   formatWibDate,
   formatWibTime,
@@ -184,6 +186,8 @@ function AdminDashboard() {
   // Update the configuration in src/config/adminConfig.js
 
   const [userData, setUserData] = useState(null);
+  const isMonitorOnly = isMonitorOnlyAdmin(userData);
+  const canManage = canManageAdminOperations(userData);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [pendingRegistrations, setPendingRegistrations] = useState([]);
@@ -218,6 +222,19 @@ function AdminDashboard() {
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [leaveRequestsLoading, setLeaveRequestsLoading] = useState(false);
   const [processingLeaveId, setProcessingLeaveId] = useState(null);
+
+  useEffect(() => {
+    const managerOnlyTabs = new Set([
+      'leave-management',
+      'payroll-management',
+      'notifications',
+      'daily-reminders',
+      'onsite-code',
+    ]);
+    if (!canManage && managerOnlyTabs.has(activeTab)) {
+      setActiveTab('overview');
+    }
+  }, [activeTab, canManage]);
 
   // Fetch all data
   useEffect(() => {
@@ -528,6 +545,11 @@ function AdminDashboard() {
 
   // Send daily reminders to all active employees
   const sendDailyReminders = async () => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak memiliki izin untuk mengirim reminder.');
+      return;
+    }
+
     const activeEmployees = employees.filter(isActiveAccount);
     let sent = 0;
     let skippedNoPhone = 0;
@@ -587,6 +609,10 @@ function AdminDashboard() {
 
   // Approve registration with notifications
   const approveRegistration = async (registration) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak memiliki izin untuk menyetujui pendaftaran.');
+      return;
+    }
     const assignment = getRegistrationAssignment(registration);
     if (!assignment.valid) {
       alert('Penugasan pendaftar tidak valid. Persetujuan diblokir; pilih Reject dan minta pendaftaran ulang.');
@@ -718,6 +744,10 @@ function AdminDashboard() {
 
   // Reject registration with notifications
   const rejectRegistration = async (registration) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak memiliki izin untuk menolak pendaftaran.');
+      return;
+    }
     if (!window.confirm(`Are you sure you want to reject ${registration.name}'s registration?`)) {
       return;
     }
@@ -787,6 +817,10 @@ function AdminDashboard() {
 
   // Toggle employee status
   const toggleEmployeeStatus = async (employee) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak memiliki izin untuk mengubah status pegawai.');
+      return;
+    }
     if (!['active', 'suspended'].includes(employee.accountStatus)) {
       alert('Hanya akun active atau suspended yang dapat diubah dari menu ini.');
       return;
@@ -823,6 +857,10 @@ function AdminDashboard() {
 
   // Edit employee data
   const editEmployee = async (employeeData) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak memiliki izin untuk mengubah data pegawai.');
+      return;
+    }
     try {
       setProcessingId(employeeData.id);
 
@@ -877,6 +915,10 @@ function AdminDashboard() {
 
   // Open edit modal
   const openEditModal = (employee) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak dapat mengedit data pegawai.');
+      return;
+    }
     setEditingEmployee({
       id: employee.id,
       name: employee.name || '',
@@ -897,6 +939,10 @@ function AdminDashboard() {
 
   // Open delete employee modal
   const openDeleteModal = (employee) => {
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak dapat menghapus pegawai.');
+      return;
+    }
     setEmployeeToDelete(employee);
     setShowDeleteModal(true);
   };
@@ -1077,6 +1123,10 @@ function AdminDashboard() {
   // Admin password reset function
   const handlePasswordReset = async (e) => {
     e.preventDefault();
+    if (!canManage) {
+      alert('Akses Dibatasi: Akun pemantau (monitoring) tidak memiliki izin untuk mereset password.');
+      return;
+    }
     setPasswordResetLoading(true);
     setPasswordResetResult(null);
 
@@ -1295,7 +1345,9 @@ function AdminDashboard() {
     </select>
     </div>
 
-    <span className="text-xs sm:text-sm text-gray-600">Admin: {userData?.name}</span>
+    <span className="text-xs sm:text-sm text-gray-600 font-medium">
+      {isMonitorOnly ? 'Admin Pemantau' : 'Admin'}: {userData?.name}
+    </span>
     <button
     onClick={handleLogout}
     className="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
@@ -1308,6 +1360,27 @@ function AdminDashboard() {
     </div>
 
     <div className="max-w-7xl mx-auto px-2 sm:px-4 py-6">
+    {isMonitorOnly && (
+      <div
+        role="status"
+        className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 text-blue-900 shadow-sm"
+      >
+        <div className="flex items-start sm:items-center space-x-3">
+          <span className="text-2xl">🔍</span>
+          <div>
+            <h4 className="font-semibold text-sm sm:text-base text-blue-950">
+              Mode Pemantau / Monitoring (Hanya Baca)
+            </h4>
+            <p className="text-xs sm:text-sm text-blue-800 mt-0.5">
+              Akun Anda memiliki hak akses penuh untuk memantau absensi, matriks kehadiran harian, rekapitulasi periode, dan laporan. Fitur modifikasi data (approval, edit profil, hapus data, reset password) dinonaktifkan.
+            </p>
+          </div>
+        </div>
+        <span className="self-start sm:self-center px-3 py-1 bg-blue-200/80 text-blue-900 text-xs font-semibold rounded-full uppercase tracking-wider">
+          Read-Only
+        </span>
+      </div>
+    )}
     {showPrivateAttendancePolicyNotice && (
       <div
         role="status"
@@ -1460,7 +1533,7 @@ function AdminDashboard() {
     </div>
 
     {/* Quick Actions */}
-    {notificationSettings.method !== 'none' && (
+    {canManage && notificationSettings.method !== 'none' && (
       <div className="bg-white rounded-xl shadow-md p-4 mb-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-2 sm:space-y-0">
       <h3 className="text-base sm:text-lg font-semibold text-gray-800">Quick Actions</h3>
@@ -1478,6 +1551,7 @@ function AdminDashboard() {
     )}
 
     {/* Employee Management Tips */}
+    {canManage && (
     <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 sm:p-4 mb-6">
       <div className="flex items-start space-x-2 sm:space-x-3">
         <div className="w-5 h-5 sm:w-6 sm:h-6 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -1497,6 +1571,7 @@ function AdminDashboard() {
         </div>
       </div>
     </div>
+    )}
 
     {/* Tabs */}
     <div className="bg-white rounded-xl shadow-md mb-6">
@@ -1545,7 +1620,7 @@ function AdminDashboard() {
     >
     Employee Management
     </button>
-    {FEATURES.leave && (
+    {canManage && FEATURES.leave && (
     <button
     onClick={() => setActiveTab('leave-management')}
     className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
@@ -1557,7 +1632,7 @@ function AdminDashboard() {
     Leave Management
     </button>
     )}
-    {FEATURES.payroll && (
+    {canManage && FEATURES.payroll && (
     <button
     onClick={() => setActiveTab('payroll-management')}
     className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
@@ -1579,36 +1654,42 @@ function AdminDashboard() {
     >
     🔐 Password Reset
     </button>
-    <button
-    onClick={() => setActiveTab('notifications')}
-    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
-      activeTab === 'notifications'
-      ? 'border-green-500 text-green-600'
-      : 'border-transparent text-gray-500 hover:text-gray-700'
-    }`}
-    >
-    🔔 App Updates
-    </button>
-    <button
-    onClick={() => setActiveTab('daily-reminders')}
-    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
-      activeTab === 'daily-reminders'
-      ? 'border-green-500 text-green-600'
-      : 'border-transparent text-gray-500 hover:text-gray-700'
-    }`}
-    >
-    📱 Daily Reminders
-    </button>
-    <button
-    onClick={() => setActiveTab('onsite-code')}
-    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
-      activeTab === 'onsite-code'
-      ? 'border-green-500 text-green-600'
-      : 'border-transparent text-gray-500 hover:text-gray-700'
-    }`}
-    >
-    🔢 Kode Onsite
-    </button>
+    {canManage && (
+      <button
+      onClick={() => setActiveTab('notifications')}
+      className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+        activeTab === 'notifications'
+        ? 'border-green-500 text-green-600'
+        : 'border-transparent text-gray-500 hover:text-gray-700'
+      }`}
+      >
+      🔔 App Updates
+      </button>
+    )}
+    {canManage && (
+      <button
+      onClick={() => setActiveTab('daily-reminders')}
+      className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+        activeTab === 'daily-reminders'
+        ? 'border-green-500 text-green-600'
+        : 'border-transparent text-gray-500 hover:text-gray-700'
+      }`}
+      >
+      📱 Daily Reminders
+      </button>
+    )}
+    {canManage && (
+      <button
+      onClick={() => setActiveTab('onsite-code')}
+      className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+        activeTab === 'onsite-code'
+        ? 'border-green-500 text-green-600'
+        : 'border-transparent text-gray-500 hover:text-gray-700'
+      }`}
+      >
+      🔢 Kode Onsite
+      </button>
+    )}
     <button
     onClick={() => setActiveTab('geofence-verification')}
     className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
@@ -1620,6 +1701,16 @@ function AdminDashboard() {
     📍 Verifikasi Geofence
     </button>
     <button
+    onClick={() => setActiveTab('period-recap')}
+    className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
+      activeTab === 'period-recap'
+      ? 'border-green-500 text-green-600'
+      : 'border-transparent text-gray-500 hover:text-gray-700'
+    }`}
+    >
+    📋 Rekap Periode
+    </button>
+    <button
     onClick={() => setActiveTab('reports')}
     className={`py-3 px-3 md:px-6 font-medium text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap ${
       activeTab === 'reports'
@@ -1629,6 +1720,16 @@ function AdminDashboard() {
     >
     📊 Reports
     </button>
+    <button
+    onClick={() => setActiveTab('deliverables')}
+    className={`py-3 px-3 md:px-6 font-bold text-xs md:text-sm border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+      activeTab === 'deliverables'
+      ? 'border-blue-600 text-blue-700 bg-blue-50/60'
+      : 'border-transparent text-blue-700 hover:text-blue-900 bg-blue-50/20'
+    }`}
+    >
+    📁 Deliverables KAK
+    </button>
     </nav>
     </div>
 
@@ -1636,6 +1737,40 @@ function AdminDashboard() {
     {/* Today's Attendance Tab */}
     {activeTab === 'overview' && (
       <div>
+      {/* Deliverables KAK Portal Quick Card */}
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white rounded-2xl shadow-md p-5 mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-blue-400/30">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl shrink-0">
+            📁
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="bg-yellow-300 text-amber-950 text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                Output Kontrak KAK
+              </span>
+              <span className="text-xs text-blue-200">
+                PT Surya Abadi Konsultan
+              </span>
+            </div>
+            <h4 className="font-bold text-base md:text-lg text-white mt-0.5">
+              Portal Laporan & Deliverables KAK (15 Output Kontrak)
+            </h4>
+            <p className="text-xs text-blue-100 mt-0.5">
+              Kelola, pantau, dan verifikasi Laporan Pendahuluan, Bulanan (1–10), Triwulanan, dan Laporan Akhir oleh Team Leader (Misdar Putra).
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('deliverables')}
+          className="w-full md:w-auto px-5 py-2.5 bg-yellow-300 hover:bg-yellow-200 text-amber-950 font-bold text-xs rounded-xl shadow-md transition transform active:scale-95 shrink-0 flex items-center justify-center gap-1.5"
+        >
+          <span>🚀</span>
+          <span>Buka Deliverables KAK</span>
+        </button>
+      </div>
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
       <div>
         <h3 className="text-base sm:text-lg font-semibold text-gray-800">
@@ -1911,6 +2046,7 @@ function AdminDashboard() {
           ...todayAttendances,
         ]}
         onChanged={handleAttendanceCorrectionChanged}
+        readOnly={isMonitorOnly}
       />
       </div>
     )}
@@ -1945,21 +2081,29 @@ function AdminDashboard() {
           Requested: {formatDate(registration.requestedAt || registration.registeredAt || registration.createdAt)}
           </p>
           </div>
-          <div className="flex space-x-2">
-          <button
-          onClick={() => approveRegistration(registration)}
-          disabled={processingId === registration.id || !assignment.valid}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-          {processingId === registration.id ? 'Processing...' : 'Approve'}
-          </button>
-          <button
-          onClick={() => rejectRegistration(registration)}
-          disabled={processingId === registration.id}
-          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-          Reject
-          </button>
+          <div className="flex space-x-2 items-center">
+          {isMonitorOnly ? (
+            <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs font-medium border border-gray-200">
+              Mode Lihat Saja
+            </span>
+          ) : (
+            <>
+              <button
+              onClick={() => approveRegistration(registration)}
+              disabled={processingId === registration.id || !assignment.valid}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+              {processingId === registration.id ? 'Processing...' : 'Approve'}
+              </button>
+              <button
+              onClick={() => rejectRegistration(registration)}
+              disabled={processingId === registration.id}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+              Reject
+              </button>
+            </>
+          )}
           </div>
           </div>
           </div>
@@ -1976,7 +2120,7 @@ function AdminDashboard() {
 
     {/* Admin-assisted recovery for Authentication accounts without profiles */}
     {activeTab === 'recovery' && (
-      <IncompleteRegistrations onQueued={handleRecoveryQueued} />
+      <IncompleteRegistrations onQueued={handleRecoveryQueued} readOnly={isMonitorOnly} />
     )}
 
     {/* Employee Management Tab */}
@@ -2057,55 +2201,52 @@ function AdminDashboard() {
           {employee.updatedAt ? formatDate(employee.updatedAt) : formatDate(employee.registeredAt)}
           </td>
           <td className="py-3 px-4">
-          <div className="flex space-x-2">
-          {['pending', 'active', 'inactive', 'suspended'].includes(employee.accountStatus) && (
-            <button
-            onClick={() => openEditModal(employee)}
-            disabled={processingId === employee.id}
-            className={`px-3 py-1 text-xs rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 ${
-              processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-            title="Edit employee data"
-            >
-            Edit
-            </button>
+          {isMonitorOnly ? (
+            <span className="text-xs text-gray-400 italic">Lihat Saja</span>
+          ) : (
+            <div className="flex space-x-2">
+            {['pending', 'active', 'inactive', 'suspended'].includes(employee.accountStatus) && (
+              <button
+              onClick={() => openEditModal(employee)}
+              disabled={processingId === employee.id}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 ${
+                processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              title="Edit employee data"
+              >
+              Edit
+              </button>
+            )}
+
+            {['active', 'suspended'].includes(employee.accountStatus) && (
+              <button
+              onClick={() => toggleEmployeeStatus(employee)}
+              disabled={processingId === employee.id}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                employee.accountStatus === 'active'
+                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                : 'bg-green-100 text-green-700 hover:bg-green-200'
+              } ${processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+              {employee.accountStatus === 'active' ? 'Suspend' : 'Activate'}
+              </button>
+            )}
+
+            {/* Only show delete button for suspended employees */}
+            {employee.accountStatus === 'suspended' && (
+              <button
+              onClick={() => openDeleteModal(employee)}
+              disabled={processingId === employee.id}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors bg-red-600 text-white hover:bg-red-700 ${
+                processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              title="Permanently delete employee (only available for suspended employees)"
+              >
+              Delete
+              </button>
+            )}
+            </div>
           )}
-          
-          {['active', 'suspended'].includes(employee.accountStatus) && (
-            <button
-            onClick={() => toggleEmployeeStatus(employee)}
-            disabled={processingId === employee.id}
-            className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-              employee.accountStatus === 'active'
-              ? 'bg-red-100 text-red-700 hover:bg-red-200'
-              : 'bg-green-100 text-green-700 hover:bg-green-200'
-            } ${processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-            {employee.accountStatus === 'active' ? 'Suspend' : 'Activate'}
-            </button>
-          )}
-          
-          {/* Only show delete button for suspended employees */}
-          {employee.accountStatus === 'suspended' && (
-            <button
-            onClick={() => openDeleteModal(employee)}
-            disabled={processingId === employee.id}
-            className={`px-3 py-1 text-xs rounded-lg transition-colors bg-red-600 text-white hover:bg-red-700 ${
-              processingId === employee.id ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-            title="Permanently delete employee (only available for suspended employees)"
-            >
-            Delete
-            </button>
-          )}
-          
-          {/* Show info for active employees */}
-          {employee.accountStatus === 'active' && (
-            <span className="px-3 py-1 text-xs text-gray-500 bg-gray-100 rounded-lg">
-              Suspend first
-            </span>
-          )}
-          </div>
           </td>
           </tr>
         ))
@@ -2123,7 +2264,7 @@ function AdminDashboard() {
     )}
 
     {/* Leave Management Tab */}
-    {activeTab === 'leave-management' && (
+    {canManage && activeTab === 'leave-management' && (
       <div className="p-6">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-semibold text-gray-800">Leave Management</h3>
@@ -2254,7 +2395,7 @@ function AdminDashboard() {
     )}
 
     {/* Payroll Management Tab */}
-    {activeTab === 'payroll-management' && (
+    {canManage && activeTab === 'payroll-management' && (
       <div className="p-6">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-semibold text-gray-800">Payroll Management</h3>
@@ -2328,45 +2469,54 @@ function AdminDashboard() {
             </div>
           )}
 
-          <form onSubmit={handlePasswordReset} className="space-y-4">
-            <div>
-              <label htmlFor="resetEmail" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Karyawan
-              </label>
-              <input
-                type="email"
-                id="resetEmail"
-                value={passwordResetEmail}
-                onChange={(e) => setPasswordResetEmail(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="nama@perusahaan.com"
-                disabled={passwordResetLoading}
-              />
+          {isMonitorOnly ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">Mode Pemantau (Hanya Baca)</p>
+              <p className="mt-1 text-xs text-slate-600">
+                Fitur reset password karyawan hanya dapat dijalankan oleh Admin Pengelola.
+              </p>
             </div>
+          ) : (
+            <form onSubmit={handlePasswordReset} className="space-y-4">
+              <div>
+                <label htmlFor="resetEmail" className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Karyawan
+                </label>
+                <input
+                  type="email"
+                  id="resetEmail"
+                  value={passwordResetEmail}
+                  onChange={(e) => setPasswordResetEmail(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="nama@perusahaan.com"
+                  disabled={passwordResetLoading}
+                />
+              </div>
 
-            <button
-              type="submit"
-              disabled={passwordResetLoading}
-              className={`w-full py-2 px-4 rounded-lg text-white font-medium transition-colors ${
-                passwordResetLoading
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
-              }`}
-            >
-              {passwordResetLoading ? (
-                <span className="flex items-center justify-center">
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Processing...
-                </span>
-              ) : (
-                'Reset Password'
-              )}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={passwordResetLoading}
+                className={`w-full py-2 px-4 rounded-lg text-white font-medium transition-colors ${
+                  passwordResetLoading
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
+                }`}
+              >
+                {passwordResetLoading ? (
+                  <span className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Processing...
+                  </span>
+                ) : (
+                  'Reset Password'
+                )}
+              </button>
+            </form>
+          )}
 
           <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <h5 className="text-sm font-semibold text-yellow-800 mb-2">⚠️ Penting</h5>
@@ -2384,28 +2534,42 @@ function AdminDashboard() {
     )}
 
     {/* App Updates Tab */}
-    {activeTab === 'notifications' && (
+    {canManage && activeTab === 'notifications' && (
       <AdminNotificationPanel />
     )}
 
     {/* Daily Reminders Tab */}
-    {activeTab === 'daily-reminders' && (
+    {canManage && activeTab === 'daily-reminders' && (
       <DailyReminderPanel />
     )}
 
     {/* Rotating onsite presence code */}
-    {activeTab === 'onsite-code' && (
+    {canManage && activeTab === 'onsite-code' && (
       <OnsitePresenceCode />
     )}
 
     {/* Server-authoritative two-admin geofence verification */}
     {activeTab === 'geofence-verification' && (
-      <GeofenceVerificationPanel />
+      <GeofenceVerificationPanel readOnly={isMonitorOnly} />
     )}
 
-    {/* Monthly Reports Tab */}
+    {/* Period Recap Tab */}
+    {activeTab === 'period-recap' && (
+      <PeriodRecap />
+    )}
+
+    {/* Reports Tab — arsip bukti + laporan detail */}
     {activeTab === 'reports' && (
-      <MonthlyReports />
+      <ReportsWorkspace />
+    )}
+
+    {/* Deliverables KAK Tab — Laporan Pendahuluan, Bulanan, Triwulanan, Akhir */}
+    {activeTab === 'deliverables' && (
+      <DeliverablesHub
+        user={auth?.currentUser}
+        userData={userData}
+        readOnly={isMonitorOnly}
+      />
     )}
 
     {/* Edit Employee Modal */}

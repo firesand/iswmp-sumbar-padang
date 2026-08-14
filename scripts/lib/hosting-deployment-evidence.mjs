@@ -13,6 +13,17 @@ const REQUIRED_SCRIPT_SOURCES = new Set([
   'https://www.google.com/recaptcha/',
   'https://www.gstatic.com/recaptcha/',
 ]);
+const REQUIRED_MEDIA_SOURCES = new Set([
+  "'self'",
+  'data:',
+  'blob:',
+  'https://firebasestorage.googleapis.com',
+]);
+const REQUIRED_FRAME_SOURCES = new Set([
+  'https://www.google.com/recaptcha/',
+  'https://recaptcha.google.com/recaptcha/',
+  'https://www.youtube-nocookie.com',
+]);
 
 export class HostingEvidenceMismatch extends Error {
   constructor(code, message) {
@@ -68,6 +79,20 @@ export const assertStrictScriptCsp = value => {
     mismatch(
       'HOSTING_CSP_SCRIPT_POLICY_INVALID',
       'script-src live tidak sama dengan allowlist aplikasi.'
+    );
+  }
+  const mediaSources = new Set(directives.get('media-src') || []);
+  if (!sameStringSet(mediaSources, REQUIRED_MEDIA_SOURCES)) {
+    mismatch(
+      'HOSTING_CSP_MEDIA_POLICY_INVALID',
+      'media-src live tidak sama dengan allowlist media deliverable.'
+    );
+  }
+  const frameSources = new Set(directives.get('frame-src') || []);
+  if (!sameStringSet(frameSources, REQUIRED_FRAME_SOURCES)) {
+    mismatch(
+      'HOSTING_CSP_FRAME_POLICY_INVALID',
+      'frame-src live tidak sama dengan allowlist iframe aplikasi.'
     );
   }
   for (const [directive, expected] of [

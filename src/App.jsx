@@ -5,7 +5,6 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './config/firebase';
 import { initEmailJS } from './services/emailService';
-import { initializeNotificationSystem } from './services/notificationService';
 import { FEATURES } from './config/projectConfig';
 
 // Components
@@ -28,8 +27,17 @@ import LeaveManagement from './components/Admin/LeaveManagement';
 import PayrollManagement from './components/Admin/PayrollManagement';
 import Footer from './components/Common/Footer';
 import AppUpdateNotification from './components/Common/AppUpdateNotification';
+import AttendanceFlashNotification from './components/Common/AttendanceFlashNotification';
 import CacheClearedToast from './components/Common/CacheClearedToast';
-import { hasAdminAccess } from './utils/authorization';
+import DeliverablesHub from './components/Deliverables/DeliverablesHub';
+import DeliverablePublicView from './components/Deliverables/DeliverablePublicView';
+import {
+  hasActiveAccount,
+  hasAdminAccess,
+  canManageAdminOperations,
+  hasEmployeeAccess,
+  hasDeliverablesAccess,
+} from './utils/authorization';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -48,18 +56,6 @@ function App() {
     } catch (error) {
       console.error('Failed to initialize EmailJS:', error);
     }
-
-    // Initialize notification system
-    const initNotificationSystem = async () => {
-      try {
-        await initializeNotificationSystem();
-        console.log('Notification system initialized successfully');
-      } catch (error) {
-        console.error('Failed to initialize notification system:', error);
-      }
-    };
-
-    initNotificationSystem();
 
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
       console.log('Auth state changed:', authUser?.email);
@@ -137,7 +133,13 @@ function App() {
   }
 
   // Protected Route Component
-  const ProtectedRoute = ({ children, requireAdmin = false }) => {
+  const ProtectedRoute = ({
+    children,
+    requireAdmin = false,
+    requireManager = false,
+    requireDeliverables = false,
+    requireEmployee = false,
+  }) => {
     console.log('ProtectedRoute - User:', user?.email, 'UserData:', userData, 'RequireAdmin:', requireAdmin);
 
     if (!user) {
@@ -161,6 +163,26 @@ function App() {
     if (requireAdmin && !hasAdminAccess(userData)) {
       console.log('ProtectedRoute - User is not admin, redirecting to employee');
       return <Navigate to="/employee" replace />;
+    }
+
+    if (requireManager && !canManageAdminOperations(userData)) {
+      console.log('ProtectedRoute - Monitor account cannot access a write route');
+      return <Navigate to="/admin" replace />;
+    }
+
+    if (requireDeliverables && !hasDeliverablesAccess(userData)) {
+      console.log('ProtectedRoute - User cannot access deliverables');
+      return <Navigate to="/employee" replace />;
+    }
+
+    if (requireEmployee && !hasEmployeeAccess(userData)) {
+      if (hasAdminAccess(userData)) {
+        console.log('ProtectedRoute - Admin account cannot use employee write routes');
+        return <Navigate to="/admin" replace />;
+      }
+
+      console.log('ProtectedRoute - Employee account is not active');
+      return <Navigate to="/" replace />;
     }
 
     return children;
@@ -188,9 +210,10 @@ function App() {
       return <PendingApproval />;
     }
 
-    // Handle suspended users
-    if (['suspended', 'resigned', 'rejected'].includes(userData.accountStatus)) {
-      console.log('User is suspended/resigned/rejected');
+    // Handle every non-pending account that is not currently active. Routing
+    // inactive employees back here prevents direct employee URLs from looping.
+    if (!hasActiveAccount(userData)) {
+      console.log('User account is inactive');
       return (
         <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center">
           <div className="text-center">
@@ -227,6 +250,10 @@ function App() {
             userId={user?.uid} 
             userRole={userData?.role} 
           />
+          <AttendanceFlashNotification
+            user={user}
+            userData={userData}
+          />
           <CacheClearedToast />
           
           <Routes>
@@ -258,7 +285,7 @@ function App() {
             <Route
               path="/employee"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireEmployee={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <EmployeeDashboard />
@@ -271,7 +298,7 @@ function App() {
             <Route
               path="/employee/profile"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireEmployee={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <EmployeeProfile />
@@ -285,7 +312,7 @@ function App() {
             <Route
               path="/employee/leave-request"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireEmployee={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <LeaveRequest />
@@ -300,7 +327,7 @@ function App() {
             <Route
               path="/employee/location-update"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireEmployee={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <LocationUpdate />
@@ -315,7 +342,7 @@ function App() {
             <Route
               path="/employee/payroll-request"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireEmployee={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <PayrollRequest />
@@ -324,6 +351,48 @@ function App() {
               }
             />
             )}
+
+            {/* Deliverables KAK Hub Route */}
+            <Route
+              path="/deliverables"
+              element={
+                <ProtectedRoute requireDeliverables={true}>
+                  <ErrorBoundary>
+                    <Header user={user} userData={userData} />
+                    <DeliverablesHub user={user} userData={userData} />
+                  </ErrorBoundary>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/team-leader/deliverables"
+              element={
+                <ProtectedRoute requireDeliverables={true}>
+                  <ErrorBoundary>
+                    <Header user={user} userData={userData} />
+                    <DeliverablesHub user={user} userData={userData} />
+                  </ErrorBoundary>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Public / Shareable Deliverable Document View */}
+            <Route
+              path="/deliverables/view/:id"
+              element={
+                <ErrorBoundary>
+                  <DeliverablePublicView />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="/doc/:id"
+              element={
+                <ErrorBoundary>
+                  <DeliverablePublicView />
+                </ErrorBoundary>
+              }
+            />
 
             {/* Admin Dashboard Route */}
             <Route
@@ -343,7 +412,7 @@ function App() {
             <Route
               path="/admin/leave-management"
               element={
-                <ProtectedRoute requireAdmin={true}>
+                <ProtectedRoute requireAdmin={true} requireManager={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <LeaveManagement />
@@ -358,7 +427,7 @@ function App() {
             <Route
               path="/admin/payroll-management"
               element={
-                <ProtectedRoute requireAdmin={true}>
+                <ProtectedRoute requireAdmin={true} requireManager={true}>
                   <ErrorBoundary>
                     <Header user={user} userData={userData} />
                     <PayrollManagement />

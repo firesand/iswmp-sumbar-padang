@@ -249,7 +249,7 @@ export const sendBulkReminders = async (employees, method = 'both', customMessag
       whatsappRecipients,
       hasCustom
         ? customMessage
-        : `Pagi {name}! Jangan lupa check-in hari ini ya.\n\nJam kerja: 08:00-17:00 WIB\nLogin: ${getAppUrl()}`
+        : `Pagi {name}! Jangan lupa check-in hari ini ya.\n\nJam kerja: 08:00-16:00 WIB (Batas on-time: 08:10 WIB)\nLogin: ${getAppUrl()}`
     );
     results.push(...whatsappResults);
   }
@@ -260,7 +260,7 @@ export const sendBulkReminders = async (employees, method = 'both', customMessag
       hasCustom ? 'Pengumuman' : 'Reminder: Check-in Hari Ini',
       hasCustom
         ? customMessage
-        : `Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-17:00 WIB\n\nLogin: ${getAppUrl()}`
+        : `Pagi {name}! Jangan lupa check-in hari ini ya. Jam kerja: 08:00-16:00 WIB (Batas on-time: 08:10 WIB)\n\nLogin: ${getAppUrl()}`
     );
     results.push(...emailResults);
   }

@@ -45,6 +45,24 @@ const locationPhotoPolicy = (fixtureNowMs, overrides = {}) => activePolicy({
   ...overrides,
 });
 
+const locationPhotoPermanentPolicy = (fixtureNowMs, overrides = {}) =>
+  activePolicy({
+    attendanceSecurityCutoverAt: timestamp(fixtureNowMs - 60_000),
+    attendanceVerificationMode: VERIFICATION_MODE_LOCATION_PHOTO,
+    locationPhotoModePolicyVersion: 2,
+    locationPhotoModeEnabledAt: timestamp(fixtureNowMs - 60 * 60_000),
+    locationPhotoModeExpiresAt: null,
+    locationPhotoModePermanent: {
+      acceptedBy: "Pemilik Proyek ISWMP",
+      acceptedAt: timestamp(fixtureNowMs - 60 * 60_000),
+      reason: "Admin kedua tidak di Padang; dual-control tidak mungkin.",
+    },
+    locationPhotoAllowedLocations: [],
+    locationPhotoAllowedLocationsVersion: 0,
+    locationPhotoAllowedLocationsDigest: EMPTY_ALLOWED_LOCATIONS_DIGEST,
+    ...overrides,
+  });
+
 const provisionalAssignmentLocation = {
   nama: "Kelurahan Test",
   isActive: false,
@@ -813,14 +831,14 @@ test("early-leave boundary uses the same work date and server WIB time", () => {
   const workDate = "2026-12-31";
   assert.equal(
       isEarlyLeaveCheckout(
-          Date.parse("2026-12-31T09:59:59.999Z"),
+          Date.parse("2026-12-31T08:59:59.999Z"),
           workDate,
       ),
       true,
   );
   assert.equal(
       isEarlyLeaveCheckout(
-          Date.parse("2026-12-31T10:00:00.000Z"),
+          Date.parse("2026-12-31T09:00:00.000Z"),
           workDate,
       ),
       false,
@@ -1001,10 +1019,195 @@ test("location-photo check-in stores canonical GPS and photo evidence",
       );
     });
 
+test("permanent location-photo policy issues challenges without an expiry",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const documents = {
+        [`users/${uid}`]: activeEmployee(),
+        "projectConfig/default": locationPhotoPermanentPolicy(fixtureNowMs),
+        "kelurahan/kel-test": provisionalAssignmentLocation,
+      };
+      const fake = fakeAdmin(documents);
+      const handlers = createAttendanceHandlers(fake.admin);
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.createAttendanceChallenge({
+            auth: {uid},
+            app: {appId: "test-app"},
+            data: {action: "checkIn"},
+          }),
+      );
+
+      assert.equal(result.verificationMode, VERIFICATION_MODE_LOCATION_PHOTO);
+      assert.equal(result.presenceProofRequired, false);
+      assert.equal(result.verificationModeExpiresAt, null);
+      const challengePath = fake.paths("attendanceChallenges/")[0];
+      const challenge = fake.data(challengePath);
+      assert.equal(challenge.locationPhotoModePolicyVersion, 2);
+      assert.equal(challenge.locationPhotoModeExpiresAt, null);
+      assert.equal(
+          challenge.locationPhotoModeEnabledAt.toMillis(),
+          fixtureNowMs - 60 * 60_000,
+      );
+    });
+
+test("permanent location-photo check-in stores canonical evidence",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const challenge = {
+        ...pendingLocationPhotoCheckInChallenge(fixtureNowMs),
+        locationPhotoModePolicyVersion: 2,
+        locationPhotoModeExpiresAt: null,
+      };
+      const documents = {
+        [`attendanceChallenges/${locationPhotoCheckInChallengeId}`]:
+          challenge,
+        [`attendanceChallengeLocks/${uid}_checkIn`]:
+          matchingCheckInChallengeLock(challenge),
+        [`users/${uid}`]: activeEmployee(),
+        "projectConfig/default": locationPhotoPermanentPolicy(fixtureNowMs),
+        "kelurahan/kel-test": provisionalAssignmentLocation,
+      };
+      const bucket = await fakePhotoBucket(fixtureNowMs, {
+        challengeId: locationPhotoCheckInChallengeId,
+        action: "checkIn",
+      });
+      const fake = fakeAdmin(documents, bucket);
+      const handlers = createAttendanceHandlers(fake.admin);
+
+      const result = await withFixedNow(
+          fixtureNowMs,
+          () => handlers.submitAttendance(
+              locationPhotoRequest(
+                  fixtureNowMs,
+                  "checkIn",
+                  locationPhotoCheckInChallengeId,
+              ),
+          ),
+      );
+
+      const recorded = fake.data(`attendances/${uid}_2027-01-01`);
+      assert.equal(result.success, true);
+      assert.equal(result.verificationMode, VERIFICATION_MODE_LOCATION_PHOTO);
+      assert.equal(recorded.verificationStatus, "location_photo_only");
+      assert.equal(recorded.transitionMode, true);
+      assert.equal(recorded.isWithinRadius, null);
+      assert.equal(recorded.deviceVerified, false);
+      assert.equal(recorded.presenceProof.reason, "policy_location_photo");
+      assert.equal(
+          fake.data(`attendanceOpenShifts/${uid}`).status,
+          "open",
+      );
+    });
+
+test("permanent policy rejects a challenge from a time-boxed policy",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const challenge = pendingLocationPhotoCheckInChallenge(fixtureNowMs);
+      const documents = {
+        [`attendanceChallenges/${locationPhotoCheckInChallengeId}`]:
+          challenge,
+        [`attendanceChallengeLocks/${uid}_checkIn`]:
+          matchingCheckInChallengeLock(challenge),
+        [`users/${uid}`]: activeEmployee(),
+        "projectConfig/default": locationPhotoPermanentPolicy(fixtureNowMs),
+        "kelurahan/kel-test": provisionalAssignmentLocation,
+      };
+      const bucket = await fakePhotoBucket(fixtureNowMs, {
+        challengeId: locationPhotoCheckInChallengeId,
+        action: "checkIn",
+      });
+      const fake = fakeAdmin(documents, bucket);
+      const handlers = createAttendanceHandlers(fake.admin);
+
+      await assert.rejects(
+          withFixedNow(
+              fixtureNowMs,
+              () => handlers.submitAttendance(
+                  locationPhotoRequest(
+                      fixtureNowMs,
+                      "checkIn",
+                      locationPhotoCheckInChallengeId,
+                  ),
+              ),
+          ),
+          (error) => error?.details?.reason === "ATTENDANCE_POLICY_CHANGED",
+      );
+    });
+
+test("permanent policy carrying an expiry fails closed at challenge time",
+    async () => {
+      const fixtureNowMs = nowMs;
+      const fake = fakeAdmin({
+        [`users/${uid}`]: activeEmployee(),
+        "projectConfig/default": locationPhotoPermanentPolicy(fixtureNowMs, {
+          locationPhotoModeExpiresAt:
+            timestamp(fixtureNowMs + 24 * 60 * 60_000),
+        }),
+        "kelurahan/kel-test": provisionalAssignmentLocation,
+      });
+      const handlers = createAttendanceHandlers(fake.admin);
+
+      await assert.rejects(
+          withFixedNow(
+              fixtureNowMs,
+              () => handlers.createAttendanceChallenge({
+                auth: {uid},
+                app: {appId: "test-app"},
+                data: {action: "checkIn"},
+              }),
+          ),
+          (error) => error?.details?.reason ===
+            "ATTENDANCE_VERIFICATION_POLICY_INVALID",
+      );
+      assert.equal(fake.paths("attendanceChallenges/").length, 0);
+    });
+
+test("permanent challenge snapshot carrying an expiry is invalid",
+    async () => {
+      const fixtureNowMs = nowMs;
+      // The v1 helper leaves a locationPhotoModeExpiresAt on the snapshot;
+      // a permanent-policy challenge must not carry one.
+      const challenge = {
+        ...pendingLocationPhotoCheckInChallenge(fixtureNowMs),
+        locationPhotoModePolicyVersion: 2,
+      };
+      const documents = {
+        [`attendanceChallenges/${locationPhotoCheckInChallengeId}`]:
+          challenge,
+        [`attendanceChallengeLocks/${uid}_checkIn`]:
+          matchingCheckInChallengeLock(challenge),
+        [`users/${uid}`]: activeEmployee(),
+        "projectConfig/default": locationPhotoPermanentPolicy(fixtureNowMs),
+        "kelurahan/kel-test": provisionalAssignmentLocation,
+      };
+      const bucket = await fakePhotoBucket(fixtureNowMs, {
+        challengeId: locationPhotoCheckInChallengeId,
+        action: "checkIn",
+      });
+      const fake = fakeAdmin(documents, bucket);
+      const handlers = createAttendanceHandlers(fake.admin);
+
+      await assert.rejects(
+          withFixedNow(
+              fixtureNowMs,
+              () => handlers.submitAttendance(
+                  locationPhotoRequest(
+                      fixtureNowMs,
+                      "checkIn",
+                      locationPhotoCheckInChallengeId,
+                  ),
+              ),
+          ),
+          (error) => error?.details?.reason === "CHALLENGE_POLICY_INVALID",
+      );
+    });
+
 test("checkout challenge tells the UI when an early-leave reason is required",
     async () => {
       const fixtureNowMs =
-        Date.parse("2026-12-31T09:59:00.000Z");
+        Date.parse("2026-12-31T08:59:00.000Z");
       const checkInMs = fixtureNowMs - 2 * 60 * 60_000;
       const documents = {
         [`users/${uid}`]: activeEmployee(),
@@ -1029,12 +1232,12 @@ test("checkout challenge tells the UI when an early-leave reason is required",
       );
 
       assert.equal(result.earlyLeaveReasonRequired, true);
-      assert.equal(result.earlyLeaveThresholdHourWib, 17);
+      assert.equal(result.earlyLeaveThresholdHourWib, 16);
     });
 
-test("checkout before 17:00 WIB rejects a missing reason", async () => {
+test("checkout before 16:00 WIB rejects a missing reason", async () => {
   const fixtureNowMs =
-    Date.parse("2026-12-31T09:59:00.000Z");
+    Date.parse("2026-12-31T08:59:00.000Z");
   const fixture = await locationPhotoCheckoutFixture(fixtureNowMs);
 
   await assert.rejects(
@@ -1054,10 +1257,10 @@ test("checkout before 17:00 WIB rejects a missing reason", async () => {
   );
 });
 
-test("checkout before 17:00 WIB stores a canonical early-leave marker",
+test("checkout before 16:00 WIB stores a canonical early-leave marker",
     async () => {
       const fixtureNowMs =
-        Date.parse("2026-12-31T09:59:00.000Z");
+        Date.parse("2026-12-31T08:59:00.000Z");
       const fixture = await locationPhotoCheckoutFixture(
           fixtureNowMs,
           "  Ada keperluan keluarga  ",
@@ -1074,7 +1277,7 @@ test("checkout before 17:00 WIB stores a canonical early-leave marker",
       assert.equal(result.earlyLeave, true);
       assert.equal(recorded.earlyLeave, true);
       assert.equal(recorded.earlyLeaveReason, "Ada keperluan keluarga");
-      assert.equal(recorded.earlyLeaveThresholdHourWib, 17);
+      assert.equal(recorded.earlyLeaveThresholdHourWib, 16);
       assert.ok(recorded.checkOut);
       assert.ok(recorded.checkOutLocation);
       assert.equal(typeof recorded.checkOutPhotoHash, "string");
@@ -1084,10 +1287,10 @@ test("checkout before 17:00 WIB stores a canonical early-leave marker",
       );
     });
 
-test("checkout at 17:00 WIB does not require an early-leave reason",
+test("checkout at 16:00 WIB does not require an early-leave reason",
     async () => {
       const fixtureNowMs =
-        Date.parse("2026-12-31T10:00:00.000Z");
+        Date.parse("2026-12-31T09:00:00.000Z");
       const fixture = await locationPhotoCheckoutFixture(fixtureNowMs);
 
       const result = await withFixedNow(
@@ -1101,13 +1304,13 @@ test("checkout at 17:00 WIB does not require an early-leave reason",
       assert.equal(result.earlyLeave, false);
       assert.equal(recorded.earlyLeave, false);
       assert.equal(recorded.earlyLeaveReason, null);
-      assert.equal(recorded.earlyLeaveThresholdHourWib, 17);
+      assert.equal(recorded.earlyLeaveThresholdHourWib, 16);
     });
 
-test("reason entered before the boundary is ignored at 17:00 WIB",
+test("reason entered before the boundary is ignored at 16:00 WIB",
     async () => {
       const fixtureNowMs =
-        Date.parse("2026-12-31T10:00:00.000Z");
+        Date.parse("2026-12-31T09:00:00.000Z");
       const fixture = await locationPhotoCheckoutFixture(
           fixtureNowMs,
           "Alasan diisi saat challenge masih menunjukkan pulang awal",
@@ -1197,7 +1400,7 @@ test("location-photo checkout closes an overnight shift without presence",
       });
       assert.equal(recorded.earlyLeave, false);
       assert.equal(recorded.earlyLeaveReason, null);
-      assert.equal(recorded.earlyLeaveThresholdHourWib, 17);
+      assert.equal(recorded.earlyLeaveThresholdHourWib, 16);
       assert.equal(
           fake.data(`attendanceOpenShifts/${uid}`).closureSource,
           "location-photo-checkout",

@@ -270,12 +270,14 @@ atau peran IAM serupa; itu justru membuat jalur bypass baru.
 
 ## Mode operasional sementara GPS + foto
 
-`location_photo` adalah fallback operasional yang sengaja lebih lemah daripada
-`geofence_onsite`. Gunakan hanya bila absensi harus tetap berjalan sementara
-geofence atau petugas onsite belum tersedia, dengan persetujuan pemilik risiko
-dan durasi sesingkat mungkin. Skrip dan backend menolak durasi kurang dari satu
-jam atau lebih dari **168 jam (tujuh hari)**. Jangan memperpanjangnya berulang
-kali untuk menjadikannya mode permanen.
+`location_photo` adalah mode operasional yang sengaja lebih lemah daripada
+`geofence_onsite`. Sejak **6 Agustus 2026** mode ini berjalan **permanen**
+(`locationPhotoModePolicyVersion: 2` + `locationPhotoModePermanent`) atas
+keputusan eksplisit pemilik proyek — lihat subbagian “Mode permanen eksplisit
+(policy v2)” di bawah. Varian berjangka waktu (policy v1) tetap tersedia untuk
+jendela terbatas dengan persetujuan pemilik risiko: skrip dan backend menolak
+durasi kurang dari satu jam atau lebih dari **168 jam (tujuh hari)**. Jangan
+memperpanjang v1 berulang kali untuk menjadikannya permanen — gunakan policy v2.
 
 Kontrol yang tetap berlaku adalah Auth, App Check callable, akun aktif,
 assignment canonical dengan dokumen lokasi yang tersedia,
@@ -328,6 +330,21 @@ node scripts/audit-security-state.mjs
 npx firebase login
 ```
 
+Perubahan batas waktu check-in juga harus diterapkan pada dokumen produksi;
+mengubah seed saja tidak memigrasikan `projectConfig/default`. Tinjau dahulu
+hasil dry-run, lalu jalankan apply hanya oleh operator yang berwenang:
+
+```sh
+npm run configure:attendance-deadline -- \
+  --deadline=08:10 --expected-current=08:00
+npm run configure:attendance-deadline -- \
+  --deadline=08:10 --expected-current=08:00 --apply \
+  --confirm=SET_ATTENDANCE_DEADLINE_08_10
+```
+
+Skrip memakai precondition `updateTime`, membaca ulang dokumen setelah write,
+dan berhenti tanpa perubahan bila deadline sudah bernilai `08:10`.
+
 Selalu sebutkan mode dan durasi secara eksplisit. Contoh window 24 jam:
 
 ```sh
@@ -355,9 +372,46 @@ Ganti `24` hanya dengan bilangan bulat `1..168`; nilai `168` adalah batas
 darurat, bukan default operasional. Setiap aktivasi atau perpanjangan baru
 memerlukan review risiko dan tiket baru.
 
-Pergantian mode membuat challenge lama gagal dengan
-`ATTENDANCE_POLICY_CHANGED`. Pengguna harus me-refresh dan mengambil challenge
-serta selfie baru setelah aktivasi.
+### Mode permanen eksplisit (policy v2)
+
+Per 6 Agustus 2026 pemilik proyek memutuskan `location_photo` sebagai mode
+operasional tetap karena admin kedua tidak berada di Padang sehingga
+dual-control survei geofence tidak dapat dijalankan. Policy v2 menghapus
+tenggat, tetapi hanya dengan penerimaan risiko yang tercatat sebagai data
+(`acceptedBy`, `acceptedAt`, `reason`):
+
+```sh
+# Preview; tidak menulis.
+npm run configure:attendance-mode -- \
+  --permanent \
+  --accepted-by="Nama pengambil keputusan" \
+  --reason="Alasan penerimaan risiko (8..500 karakter)."
+
+# Apply setelah preview dan tiket disetujui.
+npm run configure:attendance-mode -- \
+  --permanent \
+  --accepted-by="Nama pengambil keputusan" \
+  --reason="Alasan penerimaan risiko (8..500 karakter)." \
+  --apply
+```
+
+Backend gagal tertutup bila: `locationPhotoModeExpiresAt` masih ada bersama
+acceptance (atau sebaliknya policy v1 membawa acceptance),
+`acceptedBy`/`reason` di luar batas panjang, `acceptedAt` mendahului
+`locationPhotoModeEnabledAt` atau berada di masa depan, atau versi policy tidak
+dikenal. Skrip menghapus `locationPhotoModeExpiresAt` lewat update mask dan
+memverifikasi penghapusannya pascatulis. Record absensi tetap
+`location_photo_only`; label keamanan di atas tidak berubah.
+
+Rollback ke mode berjangka waktu tetap bisa dilakukan dengan invocation
+`--duration-hours` biasa; skrip otomatis menghapus `locationPhotoModePermanent`
+agar state tidak ambigu. `--stop-new-checkins` juga tetap berfungsi dari policy
+v2 — ia menurunkannya ke policy v1 yang sudah kedaluwarsa, dan check-out shift
+terbuka masih mendapat masa tenggang.
+
+Pergantian policy (v1 ↔ v2) membuat challenge lama gagal dengan
+`ATTENDANCE_POLICY_CHANGED`, sama seperti pergantian mode. Pengguna harus
+me-refresh dan mengambil challenge serta selfie baru setelah aktivasi.
 
 ### Daftar lokasi operasional sementara (allow-list)
 
