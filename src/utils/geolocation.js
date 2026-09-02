@@ -45,10 +45,88 @@ export function assertValidGpsForAttendance(location) {
   return location;
 }
 
+// A single getCurrentPosition call resolves on the first fix the platform can
+// produce, which indoors is usually a coarse network estimate. GPS needs a few
+// seconds of samples to converge, so watch until a fix is good enough for
+// attendance or the budget runs out, then keep the best sample seen. The
+// budget stays close to the old high+low timeout pair, so the worst case is
+// no slower than before while the common case still resolves immediately.
+const GPS_CONVERGENCE_BUDGET_MS = 20000;
+const GPS_WATCH_TIMEOUT_MS = 25000;
+const GPS_HIGH_ACCURACY_TIMEOUT_MS = 15000;
+const GPS_LOW_ACCURACY_TIMEOUT_MS = 10000;
+
+const positionToResult = (position, source) => ({
+  lat: position.coords.latitude,
+  lng: position.coords.longitude,
+  accuracy: position.coords.accuracy,
+  source,
+  capturedAt: Date.now(),
+});
+
+const acquireConvergingFix = (scope, budgetMs) =>
+  new Promise((resolve, reject) => {
+    const geolocation = scope.navigator.geolocation;
+    if (typeof geolocation.watchPosition !== 'function') {
+      geolocation.getCurrentPosition(
+        (position) => resolve(positionToResult(position, 'gps-high')),
+        reject,
+        {
+          enableHighAccuracy: true,
+          timeout: GPS_HIGH_ACCURACY_TIMEOUT_MS,
+          maximumAge: 0,
+        },
+      );
+      return;
+    }
+
+    let best = null;
+    let watchId = null;
+    let deadlineId = null;
+    let settled = false;
+
+    const settle = (finish, value) => {
+      if (settled) return;
+      settled = true;
+      if (watchId != null) geolocation.clearWatch(watchId);
+      if (deadlineId != null) scope.clearTimeout(deadlineId);
+      finish(value);
+    };
+
+    deadlineId = scope.setTimeout(() => {
+      if (best) settle(resolve, best);
+      else settle(reject, { code: 3, message: 'Waktu habis mendapatkan lokasi.' });
+    }, budgetMs);
+
+    watchId = geolocation.watchPosition(
+      (position) => {
+        const candidate = positionToResult(position, 'gps-high');
+        if (!Number.isFinite(candidate.accuracy)) return;
+        if (!best || candidate.accuracy < best.accuracy) best = candidate;
+        if (best.accuracy <= MAX_GPS_ACCURACY_FOR_CHECKIN) settle(resolve, best);
+      },
+      (error) => {
+        // A denied permission never improves with more samples. Any other
+        // error may still be followed by a usable one, so only give up while
+        // holding nothing.
+        if (error?.code === 1 || !best) settle(reject, error);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: GPS_WATCH_TIMEOUT_MS,
+        maximumAge: 0,
+      },
+    );
+  });
+
 // Get current GPS location — rejects if unavailable (no office fallback)
-export const getCurrentLocation = () => {
+export const getCurrentLocation = (options = {}) => {
+  const scope = options.scope || globalThis;
+  const budgetMs = Number.isInteger(options.convergenceBudgetMs)
+    ? options.convergenceBudgetMs
+    : GPS_CONVERGENCE_BUDGET_MS;
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
+    if (!scope.navigator?.geolocation) {
       reject(new GeolocationRequiredError(
         'Perangkat tidak mendukung GPS. Absensi memerlukan lokasi aktual.',
         'GPS_UNSUPPORTED'
@@ -56,22 +134,17 @@ export const getCurrentLocation = () => {
       return;
     }
 
-    const getPosition = (options) =>
+    const getPosition = (positionOptions) =>
       new Promise((res, rej) =>
-        navigator.geolocation.getCurrentPosition(res, rej, options)
+        scope.navigator.geolocation.getCurrentPosition(res, rej, positionOptions)
       );
 
     // maximumAge: 0 — selalu minta posisi baru, tolak cache lama
-    const highAccOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
-    const lowAccOptions = { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 };
-
-    const toResult = (pos, source) => ({
-      lat: pos.coords.latitude,
-      lng: pos.coords.longitude,
-      accuracy: pos.coords.accuracy,
-      source,
-      capturedAt: Date.now(),
-    });
+    const lowAccOptions = {
+      enableHighAccuracy: false,
+      timeout: GPS_LOW_ACCURACY_TIMEOUT_MS,
+      maximumAge: 0,
+    };
 
     const fail = (err) => {
       const code = err?.code;
@@ -98,10 +171,8 @@ export const getCurrentLocation = () => {
       }
     };
 
-    getPosition(highAccOptions)
-      .then(async (first) => {
-        const highResult = toResult(first, 'gps-high');
-
+    acquireConvergingFix(scope, budgetMs)
+      .then(async (highResult) => {
         if (
           Number.isFinite(highResult.accuracy) &&
           highResult.accuracy <= MAX_GPS_ACCURACY_FOR_CHECKIN
@@ -116,7 +187,7 @@ export const getCurrentLocation = () => {
 
         try {
           const low = await getPosition(lowAccOptions);
-          const lowResult = toResult(low, 'gps-low');
+          const lowResult = positionToResult(low, 'gps-low');
           const better =
             Number.isFinite(highResult.accuracy) &&
             Number.isFinite(lowResult.accuracy) &&
@@ -139,7 +210,7 @@ export const getCurrentLocation = () => {
       .catch(async (highErr) => {
         try {
           const low = await getPosition(lowAccOptions);
-          const lowResult = toResult(low, 'gps-low');
+          const lowResult = positionToResult(low, 'gps-low');
           if (!isValidGpsCoords(lowResult)) {
             fail({ code: 2, message: 'Koordinat GPS tidak valid' });
             return;
