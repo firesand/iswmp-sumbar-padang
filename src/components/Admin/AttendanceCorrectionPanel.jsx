@@ -21,6 +21,12 @@ import {
   resolveAttendanceCompletion,
 } from '../../utils/attendanceCorrection';
 import {
+  getCorrectionProposalRemainingMs,
+  getCorrectionProposalResubmission,
+  getCorrectionProposalState,
+  hasCorrectionReplacement,
+} from '../../utils/attendanceCorrectionProposal';
+import {
   formatWibDate,
   formatWibTime,
   getWibDateDaysAgo,
@@ -33,6 +39,26 @@ import {
 const CORRECTION_LOOKBACK_DAYS = 30;
 const DEFAULT_MAX_SHIFT_MINUTES = 1440;
 const SUGGESTED_CHECKOUT_HOUR_WIB = 17;
+
+const PROPOSAL_STATUS_LABELS = {
+  approved: 'DISETUJUI',
+  expired: 'KEDALUWARSA',
+  invalid: 'DATA TIDAK VALID',
+  pending: 'MENUNGGU REVIEW',
+  rejected: 'DITOLAK',
+  superseded: 'DIGANTIKAN',
+};
+
+const formatRemainingReviewTime = (remainingMs) => {
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return '0 menit';
+  const totalMinutes = Math.ceil(remainingMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes} menit`;
+  return minutes === 0
+    ? `${hours} jam`
+    : `${hours} jam ${minutes} menit`;
+};
 
 const wibDateTimeInput = (value = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -147,6 +173,7 @@ export default function AttendanceCorrectionPanel({
   const [detecting, setDetecting] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [proposalClock, setProposalClock] = useState(() => new Date());
 
   const eligibleRecords = useMemo(() => {
     const today = getWibDateString();
@@ -269,6 +296,13 @@ export default function AttendanceCorrectionPanel({
   }, [loadOpenCandidates, loadProposals]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setProposalClock(new Date());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (
       selectedAttendanceId &&
       eligibleRecords.some((record) => record.id === selectedAttendanceId)
@@ -351,6 +385,31 @@ export default function AttendanceCorrectionPanel({
         attendanceId: result.attendanceId,
         projection,
       });
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resubmitExpiredProposal = async (proposal) => {
+    const payload = getCorrectionProposalResubmission(proposal);
+    if (!payload) {
+      setMessage(
+        'Proposal lama tidak dapat diajukan ulang karena datanya tidak lengkap. Buat proposal baru dari formulir.'
+      );
+      return;
+    }
+
+    setLoading(true);
+    setMessage('');
+    try {
+      const result = await proposeMissingCheckoutCorrection(payload);
+      setMessage(
+        `Proposal pengganti ${result.proposalId} dibuat dan berlaku 24 jam. Wajib direview oleh admin lain.`
+      );
+      setProposalClock(new Date());
+      await Promise.all([loadProposals(), loadOpenCandidates()]);
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -482,7 +541,18 @@ export default function AttendanceCorrectionPanel({
         {proposals.length === 0 ? (
           <p className="text-sm text-gray-600">Belum ada proposal.</p>
         ) : proposals.map((proposal) => {
-          const finalStatus = proposal.decision?.status || 'pending';
+          const baseStatus = getCorrectionProposalState(
+            proposal,
+            proposalClock
+          );
+          const finalStatus = baseStatus === 'expired' &&
+            hasCorrectionReplacement(proposal, proposals, proposalClock)
+            ? 'superseded'
+            : baseStatus;
+          const remainingMs = getCorrectionProposalRemainingMs(
+            proposal,
+            proposalClock
+          );
           const selfProposed = proposal.proposerUid === auth.currentUser?.uid;
           const candidate = eligibleRecords.find(
             (record) => record.id === proposal.attendanceId
@@ -516,10 +586,35 @@ export default function AttendanceCorrectionPanel({
                   </p>
                   <p className="mt-1 text-sm text-gray-700">{proposal.reason}</p>
                 </div>
-                <span className="rounded bg-gray-100 px-2 py-1 text-xs font-semibold uppercase text-gray-700">
-                  {finalStatus}
+                <span className={`rounded px-2 py-1 text-xs font-semibold ${
+                  finalStatus === 'expired' || finalStatus === 'invalid'
+                    ? 'bg-red-100 text-red-800'
+                    : finalStatus === 'approved'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : finalStatus === 'rejected' || finalStatus === 'superseded'
+                        ? 'bg-gray-200 text-gray-700'
+                        : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {PROPOSAL_STATUS_LABELS[finalStatus] || finalStatus}
                 </span>
               </div>
+              {proposal.expiresAt && (
+                <p className={`mt-2 text-xs ${
+                  finalStatus === 'expired' ? 'font-semibold text-red-700' : 'text-gray-600'
+                }`}>
+                  {['expired', 'superseded'].includes(finalStatus)
+                    ? 'Kedaluwarsa pada'
+                    : 'Batas review'}{' '}
+                  {formatWibDate(proposal.expiresAt, {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}, {formatWibTime(proposal.expiresAt)} WIB
+                  {finalStatus === 'pending' && remainingMs !== null
+                    ? ` · tersisa ${formatRemainingReviewTime(remainingMs)}`
+                    : ''}
+                </p>
+              )}
               {finalStatus === 'pending' && (
                 <div className="mt-3 flex gap-2 items-center">
                   {readOnly ? (
@@ -552,6 +647,45 @@ export default function AttendanceCorrectionPanel({
                     </>
                   )}
                 </div>
+              )}
+              {finalStatus === 'expired' && (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs text-red-800">
+                    Proposal lama tidak dapat disetujui. Ajukan ulang untuk
+                    membuat proposal baru dengan batas review 24 jam.
+                  </p>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => resubmitExpiredProposal(proposal)}
+                      disabled={
+                        loading ||
+                        !getCorrectionProposalResubmission(proposal)
+                      }
+                      className="mt-2 rounded bg-orange-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                    >
+                      Ajukan ulang proposal
+                    </button>
+                  )}
+                  {!readOnly && (
+                    <p className="mt-2 text-[11px] text-red-700">
+                      Admin yang menekan tombol ini menjadi pengaju baru dan
+                      tidak boleh menyetujui proposal penggantinya sendiri.
+                    </p>
+                  )}
+                </div>
+              )}
+              {finalStatus === 'superseded' && (
+                <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                  Proposal ini sudah digantikan oleh proposal yang lebih baru
+                  untuk absensi yang sama. Tidak diperlukan tindakan pada kartu ini.
+                </p>
+              )}
+              {finalStatus === 'invalid' && (
+                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-800">
+                  Data masa berlaku proposal tidak valid. Jangan diproses;
+                  buat proposal baru dari formulir setelah memastikan identitas pegawai.
+                </p>
               )}
             </article>
           );

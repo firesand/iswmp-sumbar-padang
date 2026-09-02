@@ -1,5 +1,5 @@
 // Service Worker for ISWMP Padang
-// Version: 1.1.1 - Pemulihan akses, upload, rules, dan media deliverables
+// Version: 1.1.2 - Status kedaluwarsa dan pengajuan ulang koreksi checkout
 //
 // The cache name must change on every release: `activate` deletes every cache
 // that does not match it, which is what evicts the previous bundle from a
@@ -16,7 +16,7 @@ const urlsToCache = [
 
 // Reported to clients in SW_ACTIVATED messages; keep it in step with the cache
 // name above, or the logs name a release that was never deployed.
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.1.2';
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {

@@ -212,6 +212,17 @@ const RELEASE_NOTES = {
       'Video unggahan dan YouTube dapat diputar dengan kebijakan CSP yang aman',
     ],
   },
+  '1.1.2': {
+    updateMessage:
+      'Perbaikan proposal koreksi lupa check-out yang kedaluwarsa dan ' +
+      'mekanisme pengajuan ulang yang tetap memerlukan admin kedua.',
+    features: [
+      'Proposal lewat 24 jam ditandai KEDALUWARSA, bukan lagi PENDING',
+      'Batas waktu review dan sisa waktunya ditampilkan dalam WIB',
+      'Proposal kedaluwarsa dapat diajukan ulang tanpa mengetik ulang data',
+      'Proposal lama yang sudah digantikan tidak dapat diajukan ulang lagi',
+    ],
+  },
 };
 
 const notes = RELEASE_NOTES[sourceVersion];

@@ -577,14 +577,27 @@ const CheckIn = () => {
         {/* Location status */}
         {location && (
           <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center">
-              <span className="text-blue-600 mr-2">📍</span>
-              <div>
-                <div className="text-sm font-medium text-blue-800">Lokasi terdeteksi</div>
-                <div className="text-xs text-blue-600">
-                  Lat: {location.lat.toFixed(6)}, Lng: {location.lng.toFixed(6)}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <span className="text-blue-600 mr-2 text-lg">📍</span>
+                <div>
+                  <div className="text-sm font-semibold text-blue-900">Lokasi Dinamis Terdeteksi</div>
+                  <div className="text-xs text-blue-700 font-mono">
+                    Lat: {location.lat.toFixed(5)}, Lng: {location.lng.toFixed(5)}
+                    {location.accuracy != null && (
+                      <span className="ml-1 text-gray-500 font-sans">(akurasi ±{Math.round(location.accuracy)}m)</span>
+                    )}
+                  </div>
                 </div>
               </div>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.lat},${location.lng}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-blue-700 hover:text-blue-900 underline bg-white/80 px-2 py-1 rounded border border-blue-200"
+              >
+                Buka Peta ↗
+              </a>
             </div>
           </div>
         )}

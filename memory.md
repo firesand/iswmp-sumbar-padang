@@ -2,7 +2,17 @@
 
 > **Tujuan file ini:** Jembatan informasi keberlanjutan pembahasan proyek.  
 > Baca file ini di awal setiap sesi baru agar konteks tidak hilang.  
-> **Update terakhir:** 31 Juli 2026
+> **Update terakhir:** 6 Agustus 2026
+>
+> **Catatan 6 Agustus 2026:** keputusan tanpa geofence dikukuhkan ulang —
+> admin kedua sekarang **tidak berada di Padang**, sehingga dual-control
+> survei lokasi tidak mungkin dijalankan sama sekali. **Mode permanen
+> eksplisit sudah dikerjakan dan live:** `locationPhotoModePolicyVersion: 2`
+> + `locationPhotoModePermanent` (acceptedBy/acceptedAt/reason) aktif di
+> produksi — tidak ada lagi tenggat 7 hari dan tidak perlu perpanjangan
+> mingguan. Backend dan client gagal tertutup pada konfigurasi ambigu.
+> Dideploy sebagai Functions (11) + Hosting **1.0.7**; rollback tetap bisa
+> lewat `--duration-hours` biasa.
 >
 > **Catatan keamanan 23 Juli 2026:** status dan prosedur absensi pada bagian
 > lama di bawah telah digantikan oleh `docs/attendance-security-deployment.md`.
@@ -46,8 +56,9 @@
 | **Nama lengkap** | Integrated Solid Waste Management Project — Sumatera Barat, Kota Padang |
 | **Tujuan aplikasi** | Crosscheck kehadiran tim proyek (bukan HR/payroll) |
 | **Developer** | Hikmahtiar Studio |
-| **Status saat ini** | Firebase live; jalur absensi v2 fail-closed, menunggu verifikasi geofence dan uji perangkat nyata |
-| **Status deploy 31 Jul 2026** | Rules/indexes/storage + 11 Functions dideploy 01:05 WIB. Hosting **1.0.6** dideploy 11:55 WIB — bundle `assets/index-gUa1DUGa.js`, service worker `iswmp-padang-v1.0.6-correctionvisibility`. `appConfig/version.latest` = **1.0.6** diterbitkan 12:49 WIB (`forcedUpdate: false`). `notifications/global` non-aktif. Commit terakhir `844cd83` (1.0.5); perubahan 1.0.6 **belum di-commit**. Urutan deploy wajib tetap Functions → Hosting |
+| **Status saat ini** | Firebase live; absensi `location_photo` **permanen (policy v2)**; menunggu uji perangkat nyata |
+| **Status deploy 6 Agu 2026** | 11 Functions dideploy 06:57 WIB; Hosting **1.0.7** dideploy 08:41 WIB — bundle `assets/index-o4UFhSI9.js`, service worker `iswmp-padang-v1.0.7-permanentlocationphoto`. `appConfig/version.latest` = **1.0.7** diterbitkan 08:44 WIB (`forcedUpdate: false`). Config permanen `policyVersion: 2` di-apply 08:44 WIB. Perubahan working tree **belum di-commit** |
+| **Status deploy 31 Jul 2026** | Rules/indexes/storage + 11 Functions dideploy 01:05 WIB. Hosting **1.0.6** dideploy 11:55 WIB — bundle `assets/index-gUa1DUGa.js`, service worker `iswmp-padang-v1.0.6-correctionvisibility`. `appConfig/version.latest` = **1.0.6** diterbitkan 12:49 WIB (`forcedUpdate: false`). `notifications/global` non-aktif. Commit terakhir `b249552` (1.0.6), sudah di-push ke `origin/main`; working tree bersih. Urutan deploy wajib tetap Functions → Hosting |
 | **Workspace lokal** | `~/iswmp-sumbar-padang/` |
 | **Repo ISWMP (GitHub)** | https://github.com/firesand/iswmp-sumbar-padang |
 | **Firebase project** | https://console.firebase.google.com/project/iswmp-sumbar-padang |
@@ -109,25 +120,31 @@ terkontrol saat menjalankan smoke test.
   tengah malam tetap bisa dilakukan sampai batas server 1.440 menit. Koreksi
   missing-checkout memakai proposal/approval dua admin dan effective sidecar
   berlabel manual/non-device; attendance kanonik tidak diubah.
-- Deploy produksi terakhir: Hosting version `b36deec30214780e`; sebelas Function
-  `ACTIVE` Node 22 memakai source hash
-  `68eb9492ca3d99b36371156687220acd448b085f`. Artifact hosting live cocok
-  byte-for-byte dengan build lokal dan sebelas probe tanpa autentikasi ditolak
-  HTTP 401.
+- Deploy produksi terakhir (6 Agu 2026): Hosting version `a740f7c58f204b59`
+  (bundle 1.0.7); sebelas Function `ACTIVE` Node 22. Config absensi:
+  `locationPhotoModePolicyVersion: 2` permanen, tanpa `locationPhotoModeExpiresAt`.
+  Deploy sebelumnya (31 Jul): Hosting version `b36deec30214780e`; source hash
+  `68eb9492ca3d99b36371156687220acd448b085f`; artifact cocok byte-for-byte dan
+  sebelas probe tanpa autentikasi ditolak HTTP 401.
 - Snapshot data: 12/12 geofence masih nonaktif/provisional, 0 audit dual-control,
   0 bukti replay v2, dan enam attendance lama tetap legacy/unverified. Satu
   user-managed service-account key masih aktif menunggu konfirmasi konsumen.
+  **27 proposal koreksi berstatus `pending` semuanya sudah stale** (artefak
+  perubahan `configUpdateTime` pada perpanjangan-perpanjangan config sebelumnya)
+  — approval apa pun atasnya akan ditolak `CORRECTION_BASE_CHANGED`; ajukan
+  ulang proposal baru bila shift-nya masih perlu dikoreksi.
 - Firestore `DATA_WRITE` audit aktif tanpa exemption. Principal raw writer turun
   dari tujuh menjadi lima; Editor dicabut dari App Engine default account yang
   tidak terpakai dan Compute default build account. Deploy Functions berhasil
   dengan IAM build sempit.
 - **KOREKSI 30 Juli 2026:** kini ada **dua** akun `role: admin` aktif di Firestore
   (keduanya `accountStatus: active`, `isActive: true`, tanpa `mustChangePassword`).
-  Catatan lama “hanya satu admin aktif” sudah tidak berlaku. Dual-control geofence
-  dan approval koreksi missing-checkout karena itu **sudah dapat dijalankan**,
-  dengan syarat mutlak kedua akun benar-benar dipegang dua orang berbeda. Bila
-  salah satunya akun cadangan milik orang yang sama, memakainya untuk approval
-  membatalkan makna kontrol dua-pihak — jangan lakukan.
+  Catatan lama “hanya satu admin aktif” sudah tidak berlaku. **Update 6 Agu 2026:**
+  orang pemegang akun admin kedua tidak berada di Padang — dual-control
+  **geofence** (yang mensyaratkan survei fisik) dicoret permanen, tetapi
+  approval koreksi missing-checkout (tidak butuh kehadiran fisik) tetap wajib
+  dua orang berbeda. Bila salah satunya akun cadangan milik orang yang sama,
+  memakainya untuk approval membatalkan makna kontrol dua-pihak — jangan lakukan.
 
 ---
 
@@ -320,26 +337,34 @@ admin kedua di Padang jadwalnya padat dan kurang paham teknologi, sehingga syara
 Target rilis 1.0.4 adalah **memaksimalkan deteksi GPS/geotagging tanpa melibatkan
 admin kedua**.
 
+**Dikukuhkan ulang 6 Agustus 2026:** admin kedua kini **tidak berada di
+Padang**, jadi dual-control survei lokasi mustahil dijalankan. Keputusan tanpa
+geofence bersifat final; jangan usulkan workflow dua-petugas dalam bentuk apa
+pun.
+
 Konsekuensi yang harus dipahami agent berikutnya:
 
 - `location_photo` **bukan mode sementara lagi — itu mode operasional tetap.**
   Label `location_photo_only` juga menjadi label final, bukan transisi. Jangan
   pernah melabelinya “Verified v2”, “dalam radius”, atau “onsite terverifikasi”.
-- Desain mode ini punya **tenggat keras**: `MAX_LOCATION_PHOTO_MODE_DURATION_MS`
-  di `functions/attendance.js` = 7 hari, dan `scripts/configure-attendance-verification-mode.mjs`
-  membatasi `--duration-hours` ke 1..168. Saat kedaluwarsa, **semua check-in baru
-  ditolak** (`LOCATION_PHOTO_MODE_EXPIRED`); check-out masih jalan dalam masa
-  tenggang satu `maxAttendanceShiftDurationMinutes`. Tidak ada fallback otomatis.
-- Artinya perpanjangan manual harus dilakukan **setiap minggu, selamanya** — ini
-  risiko outage berulang, bukan pengaman. Banner peringatan di
-  `src/components/Admin/Dashboard.jsx` hanya tampil untuk satu UID admin dan
-  syaratnya `expiresAt > Date.now()`, jadi justru **hilang saat kedaluwarsa**.
-- Opsi yang sudah dibahas dan direkomendasikan: **mode permanen eksplisit**
-  (`policyVersion: 2` + `locationPhotoModePermanent` dengan `acceptedBy`,
-  `acceptedAt`, `reason`) supaya penerimaan risiko tercatat sebagai keputusan,
-  bukan kelalaian. Alternatif yang ditolak: auto-renew terjadwal (mengubah pemaksa
-  jadi hiasan diam-diam) dan sekadar menaikkan batas ke 90 hari (hanya memindah
-  tebing). Belum dikerjakan.
+- **Sejak 6 Agu 2026 mode ini permanen (policy v2), live di produksi.**
+  `projectConfig/default` memakai `locationPhotoModePolicyVersion: 2` +
+  `locationPhotoModePermanent` (`acceptedBy`/`acceptedAt`/`reason`); tidak ada
+  `locationPhotoModeExpiresAt`. Backend menolak konfigurasi ambigu (v1 +
+  acceptance, atau v2 + expiry, acceptance cacat/kedaluwarsa-mundur) dengan
+  `ATTENDANCE_VERIFICATION_POLICY_INVALID`.
+- Varian berjangka waktu (policy v1) tetap ada: `MAX_LOCATION_PHOTO_MODE_DURATION_MS`
+  di `functions/attendance.js` = 7 hari, `--duration-hours` 1..168. Saat
+  kedaluwarsa, **semua check-in baru ditolak** (`LOCATION_PHOTO_MODE_EXPIRED`);
+  check-out masih jalan dalam masa tenggang satu `maxAttendanceShiftDurationMinutes`.
+  Tidak ada fallback otomatis.
+- Rollback dari v2 ke v1 (atau `--stop-new-checkins`) tetap bisa lewat skrip
+  yang sama; skrip otomatis menghapus field yang kontradiktif lewat update mask.
+  Pergantian policy mematahkan challenge lama (`ATTENDANCE_POLICY_CHANGED`) —
+  pengguna harus refresh.
+- Banner peringatan tenggat di `src/components/Admin/Dashboard.jsx` otomatis
+  **tidak tampil lagi** karena `locationPhotoModeExpiresAt` kini null — itu
+  disengaja (tidak ada tenggat untuk diperingatkan), bukan regresi.
 
 ### Kalibrasi radius — tuas presisi yang tidak butuh admin kedua
 
@@ -472,7 +497,7 @@ ISWMP SumBar-Padang
 |------|--------|--------|
 | Daftar 11 kelurahan | Seed geofence | ✅ `docs/KELURAHAN.md` |
 | Survei fisik 12 geofence | Validasi lokasi/radius | 🟡 Marker masih provisional dan seluruh geofence sengaja nonaktif |
-| Dua admin aplikasi/petugas independen | Aktivasi dual-control | ✅ Dua akun admin aktif per 30 Jul 2026; verifikasi dulu keduanya dipegang dua orang berbeda sebelum dipakai approval |
+| Dua admin aplikasi/petugas independen | Aktivasi dual-control | ❌ Tidak mungkin — dua akun admin ada, tetapi admin kedua per 6 Agu 2026 tidak berada di Padang; dual-control dicoret permanen |
 | Delapan shift terbuka yang tidak di-check-out | Pegawai terkunci dari absensi | 🔴 Enam sudah lewat batas 24 jam (28–29 Jul) dan butuh koreksi dua-admin; dua dari 30 Jul masih bisa self-checkout bila belum lewat batas |
 | Smoke check-in + check-out | Bukti alur v2 nyata | ⏳ Belum ada report verify `PASS` |
 | Metrik App Check kedua service | Gate enforcement | ⏳ Firestore dan Storage tetap `UNENFORCED` |
@@ -577,7 +602,7 @@ iswmp-sumbar-padang/
 
 1. **Approve 2 proposal koreksi missing-checkout** pagi 31 Jul 2026 oleh admin kedua — batas 1 Agustus 00:29 WIB. Ini yang paling mendesak
 2. **Uji absensi nyata pagi ini** — 1.0.5 baru live dini hari dan belum pernah dipakai check-in sungguhan; pantau apakah perekaman jejak GPS 10–30 detik terasa wajar di lapangan
-3. **Putuskan nasib tenggat `location_photo`** — kedaluwarsa 7 Agu 2026 01:03 WIB. Lihat “Keputusan arah 31 Juli 2026”; opsi rekomendasi adalah mode permanen eksplisit. **Jangan usulkan geofence**
+3. ~~Putuskan nasib tenggat `location_photo`~~ — **selesai 6 Agu 2026: mode permanen eksplisit (policy v2) live.** Tidak perlu perpanjangan mingguan lagi. **Jangan usulkan geofence**
 4. **Uji perangkat nyata** — jalankan smoke preflight, check-in dan check-out, lalu verify
 5. **Pantau mode `observe` GPS** beberapa hari kerja sampai `TRACE_MISSING` nol, baru pertimbangkan `enforce`; sesudahnya pertimbangkan penurunan radius 300 → 150 m
 6. **Pantau App Check** — pertahankan `UNENFORCED` sampai report dan metrik kedua service lulus
@@ -626,6 +651,10 @@ npm run seed                             # dry-run saja; tidak menulis Firestore
 | 2026-07-30 | Diagnosis keluhan lapangan | Telemetri membuktikan 0 penolakan submit; penyebabnya tekan-ganda tombol dan shift tak ditutup; perbaikan UI + versi 1.0.4 di working tree |
 | 2026-07-31 | Deploy 1.0.4 + keputusan arah | Rules, 11 Functions, hosting dideploy; jendela `location_photo` diperpanjang ke 7 Agu 01:03 WIB; geofence dicoret permanen; audit rantai koreksi didiagnosis sebagai artefak skrip |
 | 2026-07-31 | Insiden loop reload + hotfix 1.0.5 | Tombol "Force" memicu reload tanpa henti di semua perangkat; broadcast dinonaktifkan, pengaman ditambahkan (`forcedUpdateBroadcast.js`, 17 test), hosting 1.0.5 dideploy |
+| 2026-08-05 | Diagnosis keluhan check-in seorang pegawai | Penyebab: App Check token `MISSING` dari satu perangkat (auth VALID) → callable ditolak 401 di infrastruktur sebelum handler → client menampilkan "Sesi login berakhir" yang menyesatkan. State server bersih; masalah di sisi browser pegawai |
+| 2026-08-06 | Keputusan lanjut tanpa geofence + perpanjangan location_photo | Admin kedua tidak di Padang → dual-control mustahil, keputusan tanpa geofence final. Jendela `location_photo` diperpanjang 168 jam ke 13 Agu 2026 06:17 WIB (via `configure-attendance-verification-mode.mjs --duration-hours=168 --apply`). Dikonfirmasi juga: check-in dan check-out divalidasi independen — beda lokasi bisa hanya lewat allow-list lokasi operasional |
+| 2026-08-06 | Mode permanen eksplisit (policy v2) dikerjakan + live | `locationPhotoModePolicyVersion: 2` + `locationPhotoModePermanent` di backend/client/skrip; 138 test backend + 68 frontend lulus; Functions (11) + Hosting **1.0.7** dideploy; config permanen di-apply (acceptance tercatat, `locationPhotoModeExpiresAt` terhapus terverifikasi). Catatan: 27 proposal koreksi pending semuanya sudah stale sebelum apply (artefak perpanjangan config sebelumnya), perlu diajukan ulang oleh admin |
+| 2026-08-06 | Terbit versi client 1.0.7 | `appConfig/version.latest` = 1.0.7 (`forcedUpdate: false`), sw.js live tervalidasi memuat 1.0.7 |
 
 ---
 
@@ -659,6 +688,14 @@ npm run seed                             # dry-run saja; tidak menulis Firestore
   dipanggil, jadi kegagalan itu **tidak muncul di telemetri sama sekali**. Selisih
   antara challenge dibuat dan submit sukses adalah satu-satunya petunjuknya.
   Mode `observe` GPS dirancang untuk menutup lubang ini
+- **Titik buta kedua:** penolakan App Check/auth di infrastruktur callable (HTTP
+  401) juga tidak menghasilkan `attendance_security_event`. Jejaknya ada di
+  `run.googleapis.com/requests` (status 401) dan log
+  `labels."firebase-log-type"="callable-request-verification"` yang memuat
+  `verifications.auth` dan `verifications.app` (`VALID`/`MISSING`/`INVALID`).
+  `app=MISSING` + `auth=VALID` = perangkat tidak mengirim token App Check
+  (reCAPTCHA Enterprise gagal/diblokir di browser), dan client menampilkannya
+  sebagai "Sesi login berakhir" yang menyesatkan
 - Perintah operasional keamanan harus mengikuti `docs/attendance-security-deployment.md`
 - Pendaftar saat rules rusak (setelah deploy keamanan 20 Jul) dapat mengulang form dengan email/password lama untuk memulihkan akun Auth-only
 
@@ -683,3 +720,6 @@ npm run seed                             # dry-run saja; tidak menulis Firestore
 | 1.0.0 | 2026-07-31 | Deploy 1.0.4 (rules + 11 Functions + hosting); jalur geofence dicoret permanen atas keputusan user; `location_photo` jadi mode tetap; audit rantai koreksi terbukti false alarm |
 | 1.0.1 | 2026-07-31 | Insiden loop reload akibat tombol "Force"; pengaman broadcast + skrip `stop-forced-update-loop.mjs` dan `publish-app-version.mjs`; hosting 1.0.5 |
 | 1.0.2 | 2026-07-31 | 1.0.6: jendela koreksi 7→30 hari, nama pegawai pada kartu proposal; tabrakan `configUpdateTime` didokumentasikan |
+| 1.0.3 | 2026-08-05 | Pola diagnosis penolakan callable di infrastruktur (App Check `MISSING` → 401 → "Sesi login berakhir") didokumentasikan sebagai titik buta kedua |
+| 1.0.4 | 2026-08-06 | Keputusan lanjut tanpa geofence dikukuhkan (admin kedua tidak di Padang); jendela `location_photo` diperpanjang ke 13 Agu 06:17 WIB; fakta validasi lokasi independen check-in/check-out dicatat |
+| 1.0.5 | 2026-08-06 | Mode permanen eksplisit (policy v2) live: backend, skrip konfigurasi, validasi klien, runbook diperbarui; Functions + Hosting 1.0.7 dideploy; config permanen di-apply; 27 proposal koreksi stale dicatat perlu pengajuan ulang |
