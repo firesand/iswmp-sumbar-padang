@@ -212,6 +212,17 @@ const RELEASE_NOTES = {
       'Video unggahan dan YouTube dapat diputar dengan kebijakan CSP yang aman',
     ],
   },
+  '1.1.3': {
+    updateMessage:
+      'Check-out tidak lagi gagal diam-diam saat sinyal GPS belum menajam, ' +
+      'dan pesan kegagalan absensi kini menyebut penyebabnya.',
+    features: [
+      'Aplikasi menunggu sinyal GPS menajam sebelum menolak lokasi',
+      'Izin absensi yang sudah terbit tidak lagi dibatalkan oleh pembacaan GPS kedua',
+      'Bila satu percobaan absensi terpakai, aplikasi memberitahukannya',
+      'Pesan kegagalan absensi menyebut penyebab spesifik beserta kode rujukan',
+    ],
+  },
   '1.1.2': {
     updateMessage:
       'Perbaikan proposal koreksi lupa check-out yang kedaluwarsa dan ' +

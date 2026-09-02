@@ -10,7 +10,7 @@ import {
 // App version - update this when deploying new version.
 // Must match what the admin publishes to appConfig/version.latest, otherwise
 // every client keeps prompting for an update it already has.
-const APP_VERSION = '1.1.2';
+const APP_VERSION = '1.1.3';
 
 function AppUpdateNotification({ userId, userRole }) {
   const [updateAvailable, setUpdateAvailable] = useState(false);
