@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test src/utils/attendanceCorrection.test.js src/utils/deviceIntegrity.test.js src/utils/attendanceDisplay.test.js src/utils/attendanceIntegrity.test.js src/utils/employeeAttendanceState.test.js src/utils/forcedUpdateBroadcast.test.js src/utils/geofenceVerification.test.js src/utils/gpsSignalTrace.test.js src/utils/temporaryAttendanceLocations.test.js scripts/lib/hosting-deployment-evidence.test.mjs",
+    "test": "node --test src/utils/attendanceCorrection.test.js src/utils/attendanceErrors.test.js src/utils/deviceIntegrity.test.js src/utils/attendanceDisplay.test.js src/utils/attendanceIntegrity.test.js src/utils/employeeAttendanceState.test.js src/utils/forcedUpdateBroadcast.test.js src/utils/geofenceVerification.test.js src/utils/gpsSignalTrace.test.js src/utils/temporaryAttendanceLocations.test.js scripts/lib/hosting-deployment-evidence.test.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist/ node_modules/.vite",
     "clean:all": "rm -rf dist/ node_modules/.vite node_modules/ package-lock.json && npm install",
