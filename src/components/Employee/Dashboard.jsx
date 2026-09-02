@@ -530,8 +530,24 @@ function EmployeeDashboard() {
       setCameraHint('Meminta izin absensi dari server…');
       const challenge = await createAttendanceChallenge(action, assignmentChoice);
       setCameraHint('Memeriksa lokasi terhadap titik yang diizinkan…');
-      const challengeLocationCheck = await validateLocation(challenge);
-      if (!challengeLocationCheck.isValid) return;
+      // Reuse the fix that already passed the gate above. Reading GPS again
+      // here gave the attempt a second, independent chance to fail on a coarse
+      // reading - and by this point the challenge is already spent against the
+      // daily quota, so that failure cost the employee an attempt for nothing.
+      const challengeLocationCheck = await validateLocation(challenge, {
+        location: locationCheck.location,
+      });
+      if (!challengeLocationCheck.isValid) {
+        // The employee has to know the attempt was consumed; otherwise the
+        // natural response is to press again immediately, which is what drives
+        // accounts into the daily challenge limit.
+        setLocationError(
+          `${challengeLocationCheck.message || 'Lokasi tidak valid untuk absensi.'} ` +
+            'Percobaan ini sudah terpakai dari jatah absensi hari ini. ' +
+            'Pindah ke area terbuka, tunggu sekitar 15 detik, lalu tekan tombol SATU kali.'
+        );
+        return;
+      }
       setCameraHint('Menyiapkan kamera…');
       attendanceChallengeRef.current = challenge;
       setAttendanceChallenge(challenge);
